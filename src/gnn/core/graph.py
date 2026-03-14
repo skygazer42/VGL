@@ -1,0 +1,73 @@
+from dataclasses import dataclass
+
+from gnn.core.schema import GraphSchema
+from gnn.core.stores import EdgeStore, NodeStore
+
+
+@dataclass(slots=True)
+class Graph:
+    schema: GraphSchema
+    nodes: dict[str, NodeStore]
+    edges: dict[tuple[str, str, str], EdgeStore]
+
+    @classmethod
+    def homo(cls, *, edge_index, **node_data):
+        nodes = {"node": NodeStore("node", dict(node_data))}
+        edge_type = ("node", "to", "node")
+        edges = {edge_type: EdgeStore(edge_type, {"edge_index": edge_index})}
+        schema = GraphSchema(
+            node_types=("node",),
+            edge_types=(edge_type,),
+            node_features={"node": tuple(node_data.keys())},
+            edge_features={edge_type: ("edge_index",)},
+        )
+        return cls(schema=schema, nodes=nodes, edges=edges)
+
+    @classmethod
+    def hetero(cls, *, nodes, edges, time_attr=None):
+        node_stores = {
+            node_type: NodeStore(node_type, dict(data))
+            for node_type, data in nodes.items()
+        }
+        edge_stores = {
+            edge_type: EdgeStore(edge_type, dict(data))
+            for edge_type, data in edges.items()
+        }
+        schema = GraphSchema(
+            node_types=tuple(sorted(node_stores)),
+            edge_types=tuple(sorted(edge_stores)),
+            node_features={
+                node_type: tuple(store.data.keys())
+                for node_type, store in node_stores.items()
+            },
+            edge_features={
+                edge_type: tuple(store.data.keys())
+                for edge_type, store in edge_stores.items()
+            },
+            time_attr=time_attr,
+        )
+        return cls(schema=schema, nodes=node_stores, edges=edge_stores)
+
+    @classmethod
+    def temporal(cls, *, nodes, edges, time_attr):
+        return cls.hetero(nodes=nodes, edges=edges, time_attr=time_attr)
+
+    @property
+    def x(self):
+        return self.nodes["node"].x
+
+    @property
+    def y(self):
+        return self.nodes["node"].y
+
+    @property
+    def edge_index(self):
+        return self.edges[("node", "to", "node")].edge_index
+
+    @property
+    def ndata(self):
+        return self.nodes["node"].data
+
+    @property
+    def edata(self):
+        return self.edges[("node", "to", "node")].data
