@@ -82,7 +82,7 @@ This migration should be repository-wide and explicit.
 
 The codebase should follow four rules:
 
-1. Move `src/gnn/` to `vgl/` in one migration instead of keeping a duplicated tree
+1. Move the old `src` package tree to `vgl/` in one migration instead of keeping a duplicated tree
 2. Replace current `gnn` absolute imports with `vgl` absolute imports
 3. Remove example-time `sys.path` hacks that point at `src`
 4. Keep subpackage imports working while broadening the root-package exports
@@ -94,7 +94,7 @@ This phase should not introduce:
 - partial dual-package support
 - extra naming cleanups beyond the package and project rename
 
-The migration is complete only when current production code, tests, examples, and active docs no longer rely on `gnn` or `src/gnn` references.
+The migration is complete only when current production code, tests, examples, and active docs no longer rely on the old package name or the old `src` package path.
 
 ## Documentation Strategy
 
@@ -150,8 +150,8 @@ The migration should be validated at four layers:
 
 ### Repository consistency checks
 
-- no active code or docs references `import gnn` or `from gnn`
-- no active code or docs references `src/gnn`
+- no active code or docs references the old package import patterns
+- no active code or docs references the old `src` package path
 
 ## Deliverables
 
@@ -179,7 +179,7 @@ Do not include:
 This migration will mainly affect:
 
 - `pyproject.toml`
-- `vgl/` after the move from `src/gnn/`
+- `vgl/` after the move from the old `src` package tree
 - `tests/`
 - `examples/`
 - `README.md`

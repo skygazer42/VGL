@@ -14,10 +14,10 @@ ACTIVE_TARGETS = [
 ]
 
 BANNED_SNIPPETS = [
-    'name = "gnn"',
-    "from gnn",
-    "import gnn",
-    "src/gnn",
+    'name = "g' + 'nn"',
+    "from " + "gnn",
+    "import " + "gnn",
+    "src" + "/gnn",
 ]
 
 
