@@ -22,6 +22,8 @@ For graph classification it also carries:
 
 `MessagePassing` is the low-level neural primitive for graph convolutions. `GCNConv`, `SAGEConv`, and `GATConv` build on top of it.
 
+Built-in convolution layers live under `vgl.nn.conv`. The current homogeneous operator set includes `GCNConv`, `SAGEConv`, `GATConv`, `GINConv`, `GATv2Conv`, and `APPNPConv`.
+
 ## SampleRecord
 
 `SampleRecord` is the structured pre-collation unit for graph classification. It lets the framework carry:
