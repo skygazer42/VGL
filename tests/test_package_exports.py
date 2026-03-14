@@ -1,9 +1,12 @@
 from vgl import (
     Accuracy,
+    APPNPConv,
+    GATv2Conv,
     Graph,
     GraphBatch,
     GraphSchema,
     GraphView,
+    GINConv,
     LinkPredictionBatch,
     LinkPredictionRecord,
     LinkPredictionTask,
@@ -30,10 +33,13 @@ from vgl import (
 
 def test_package_exposes_broad_vgl_root_surface():
     assert Accuracy.__name__ == "Accuracy"
+    assert APPNPConv.__name__ == "APPNPConv"
+    assert GATv2Conv.__name__ == "GATv2Conv"
     assert Graph.__name__ == "Graph"
     assert GraphBatch.__name__ == "GraphBatch"
     assert LinkPredictionBatch.__name__ == "LinkPredictionBatch"
     assert TemporalEventBatch.__name__ == "TemporalEventBatch"
+    assert GINConv.__name__ == "GINConv"
     assert GraphSchema.__name__ == "GraphSchema"
     assert GraphView.__name__ == "GraphView"
     assert ListDataset.__name__ == "ListDataset"

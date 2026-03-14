@@ -12,6 +12,11 @@ from vgl.data import NodeSeedSubgraphSampler as NodeSeedSubgraphSampler
 from vgl.data import SampleRecord as SampleRecord
 from vgl.data import TemporalEventRecord as TemporalEventRecord
 from vgl.nn import MessagePassing as MessagePassing
+from vgl.nn import APPNPConv as APPNPConv
+from vgl.nn import GATConv as GATConv
+from vgl.nn import GATv2Conv as GATv2Conv
+from vgl.nn import GCNConv as GCNConv
+from vgl.nn import GINConv as GINConv
 from vgl.nn import global_max_pool as global_max_pool
 from vgl.nn import global_mean_pool as global_mean_pool
 from vgl.nn import global_sum_pool as global_sum_pool
@@ -40,6 +45,11 @@ __all__ = [
     "SampleRecord",
     "TemporalEventRecord",
     "MessagePassing",
+    "APPNPConv",
+    "GATConv",
+    "GATv2Conv",
+    "GCNConv",
+    "GINConv",
     "global_mean_pool",
     "global_sum_pool",
     "global_max_pool",
