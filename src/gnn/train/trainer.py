@@ -1,3 +1,6 @@
+from collections.abc import Iterable
+
+
 class Trainer:
     def __init__(self, model, task, optimizer, lr, max_epochs):
         self.model = model
@@ -5,12 +8,25 @@ class Trainer:
         self.optimizer = optimizer(self.model.parameters(), lr=lr)
         self.max_epochs = max_epochs
 
-    def fit(self, graph):
+    def _batches(self, data):
+        if (
+            hasattr(data, "nodes")
+            or hasattr(data, "graphs")
+            or hasattr(data, "labels")
+            or hasattr(data, "x")
+        ):
+            return [data]
+        if isinstance(data, Iterable):
+            return data
+        return [data]
+
+    def fit(self, data):
         for _ in range(self.max_epochs):
-            self.model.train()
-            self.optimizer.zero_grad()
-            logits = self.model(graph)
-            loss = self.task.loss(graph, logits, stage="train")
-            loss.backward()
-            self.optimizer.step()
+            for batch in self._batches(data):
+                self.model.train()
+                self.optimizer.zero_grad()
+                logits = self.model(batch)
+                loss = self.task.loss(batch, logits, stage="train")
+                loss.backward()
+                self.optimizer.step()
         return {"epochs": self.max_epochs}
