@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 from gnn.core.schema import GraphSchema
 from gnn.core.stores import EdgeStore, NodeStore
+from gnn.core.view import GraphView
 
 
 @dataclass(slots=True)
@@ -51,6 +52,31 @@ class Graph:
     @classmethod
     def temporal(cls, *, nodes, edges, time_attr):
         return cls.hetero(nodes=nodes, edges=edges, time_attr=time_attr)
+
+    def snapshot(self, t):
+        if self.schema.time_attr is None:
+            raise ValueError("snapshot requires a temporal graph")
+        edges = {}
+        for edge_type, store in self.edges.items():
+            mask = store.data[self.schema.time_attr] <= t
+            edge_data = dict(store.data)
+            edge_data["edge_index"] = store.edge_index[:, mask]
+            edge_data[self.schema.time_attr] = store.data[self.schema.time_attr][mask]
+            edges[edge_type] = EdgeStore(edge_type, edge_data)
+        return GraphView(base=self, nodes=self.nodes, edges=edges, schema=self.schema)
+
+    def window(self, *, start, end):
+        if self.schema.time_attr is None:
+            raise ValueError("window requires a temporal graph")
+        edges = {}
+        for edge_type, store in self.edges.items():
+            timestamps = store.data[self.schema.time_attr]
+            mask = (timestamps >= start) & (timestamps <= end)
+            edge_data = dict(store.data)
+            edge_data["edge_index"] = store.edge_index[:, mask]
+            edge_data[self.schema.time_attr] = timestamps[mask]
+            edges[edge_type] = EdgeStore(edge_type, edge_data)
+        return GraphView(base=self, nodes=self.nodes, edges=edges, schema=self.schema)
 
     @property
     def x(self):
