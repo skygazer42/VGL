@@ -54,3 +54,21 @@ loader = Loader(
 task = GraphClassificationTask(target="label", label_source="metadata")
 trainer.fit(loader)
 ```
+
+For temporal event prediction from explicit candidate-event samples:
+
+```python
+graph = Graph.temporal(nodes=nodes, edges=edges, time_attr="timestamp")
+samples = [
+    TemporalEventRecord(graph=graph, src_index=0, dst_index=1, timestamp=3, label=1),
+    TemporalEventRecord(graph=graph, src_index=2, dst_index=0, timestamp=5, label=0),
+]
+loader = Loader(
+    dataset=ListDataset(samples),
+    sampler=FullGraphSampler(),
+    batch_size=2,
+)
+task = TemporalEventPredictionTask(target="label")
+trainer = Trainer(model=model, task=task, optimizer=torch.optim.Adam, lr=1e-3, max_epochs=10)
+trainer.fit(loader)
+```

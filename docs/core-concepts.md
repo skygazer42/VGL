@@ -33,6 +33,24 @@ For graph classification it also carries:
 
 This is what makes many-small-graph and sampled-subgraph inputs converge on the same batch contract.
 
+## TemporalEventRecord and TemporalEventBatch
+
+`TemporalEventRecord` is the explicit candidate-event unit for temporal training. Each record carries:
+
+- a temporal `graph`
+- `src_index`
+- `dst_index`
+- `timestamp`
+- `label`
+
+`TemporalEventBatch` collates these records into one model input while keeping temporal supervision explicit through:
+
+- `graph`
+- `src_index`
+- `dst_index`
+- `timestamp`
+- `labels`
+
 ## Readout
 
 Graph classification uses graph-level pooling to convert node representations into graph representations.
@@ -52,3 +70,4 @@ The current training layer supports:
 - node classification
 - graph classification with labels from graph objects
 - graph classification with labels from sample metadata
+- temporal event prediction from explicit candidate-event samples
