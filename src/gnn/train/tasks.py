@@ -4,13 +4,24 @@ from gnn.train.task import Task
 
 
 class NodeClassificationTask(Task):
-    def __init__(self, target, split, loss="cross_entropy", metrics=None):
+    def __init__(self, target, split, loss="cross_entropy", metrics=None, node_type=None):
         self.target = target
         self.train_key, self.val_key, self.test_key = split
         self.loss_name = loss
         self.metrics = metrics or []
+        self.node_type = node_type
+
+    def _node_data(self, graph):
+        if self.node_type is not None:
+            return graph.nodes[self.node_type].data
+        if "node" in graph.nodes:
+            return graph.nodes["node"].data
+        if len(graph.nodes) == 1:
+            return next(iter(graph.nodes.values())).data
+        raise ValueError("node_type is required for multi-type node classification")
 
     def loss(self, graph, logits, stage):
-        mask = getattr(graph, f"{stage}_mask")
-        target = getattr(graph, self.target)
+        node_data = self._node_data(graph)
+        mask = node_data[f"{stage}_mask"]
+        target = node_data[self.target]
         return F.cross_entropy(logits[mask], target[mask])
