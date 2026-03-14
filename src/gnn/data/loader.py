@@ -2,17 +2,28 @@ from gnn.core.batch import GraphBatch
 
 
 class Loader:
-    def __init__(self, dataset, sampler, batch_size):
+    def __init__(self, dataset, sampler, batch_size, label_source=None, label_key=None):
         self.dataset = dataset
         self.sampler = sampler
         self.batch_size = batch_size
+        self.label_source = label_source
+        self.label_key = label_key
+
+    def _build_batch(self, items):
+        if items and hasattr(items[0], "graph") and self.label_source is not None and self.label_key is not None:
+            return GraphBatch.from_samples(
+                items,
+                label_key=self.label_key,
+                label_source=self.label_source,
+            )
+        return GraphBatch.from_graphs(items)
 
     def __iter__(self):
         batch = []
-        for graph in self.dataset.graphs:
-            batch.append(self.sampler.sample(graph))
+        for item in self.dataset.graphs:
+            batch.append(self.sampler.sample(item))
             if len(batch) == self.batch_size:
-                yield GraphBatch.from_graphs(batch)
+                yield self._build_batch(batch)
                 batch = []
         if batch:
-            yield GraphBatch.from_graphs(batch)
+            yield self._build_batch(batch)
