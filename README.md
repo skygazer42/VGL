@@ -27,4 +27,5 @@ Unified graph learning framework with a stable core abstraction for homogeneous,
 
 - `python -m pytest -v`
 - `python -m ruff check .`
-- `python -m mypy src`
+- `python -m mypy vgl`
+

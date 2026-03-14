@@ -1,4 +1,4 @@
-# GNN Framework Implementation Plan
+# VGL Framework Implementation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
@@ -16,8 +16,8 @@
 - Create: `pyproject.toml`
 - Create: `.gitignore`
 - Create: `README.md`
-- Create: `src/gnn/__init__.py`
-- Create: `src/gnn/version.py`
+- Create: `vgl/__init__.py`
+- Create: `vgl/version.py`
 - Test: `tests/test_package_exports.py`
 
 **Step 1: Initialize version control and the source layout**
@@ -27,7 +27,7 @@ Run:
 ```bash
 git init
 mkdir src tests examples docs
-mkdir src/gnn
+mkdir vgl
 ```
 
 Expected: a new git repository exists in `F:\gnn\gnn` and the top-level source directories exist.
@@ -35,7 +35,7 @@ Expected: a new git repository exists in `F:\gnn\gnn` and the top-level source d
 **Step 2: Write the failing package export test**
 
 ```python
-from gnn import __version__
+from vgl import __version__
 
 
 def test_package_exposes_version_string():
@@ -58,7 +58,7 @@ requires = ["hatchling>=1.26.0"]
 build-backend = "hatchling.build"
 
 [project]
-name = "gnn"
+name = "vgl"
 version = "0.1.0"
 description = "Unified graph learning framework with PyTorch"
 readme = "README.md"
@@ -80,16 +80,16 @@ pythonpath = ["src"]
 testpaths = ["tests"]
 ```
 
-`src/gnn/version.py`
+`vgl/version.py`
 
 ```python
 __version__ = "0.1.0"
 ```
 
-`src/gnn/__init__.py`
+`vgl/__init__.py`
 
 ```python
-from gnn.version import __version__
+from vgl.version import __version__
 ```
 
 **Step 5: Run test to verify it passes**
@@ -100,16 +100,16 @@ Expected: `PASS`
 **Step 6: Commit**
 
 ```bash
-git add pyproject.toml .gitignore README.md src/gnn/__init__.py src/gnn/version.py tests/test_package_exports.py
+git add pyproject.toml .gitignore README.md vgl/__init__.py vgl/version.py tests/test_package_exports.py
 git commit -m "chore: bootstrap package skeleton"
 ```
 
 ### Task 2: Define Core Errors and the Schema Contract
 
 **Files:**
-- Create: `src/gnn/core/__init__.py`
-- Create: `src/gnn/core/errors.py`
-- Create: `src/gnn/core/schema.py`
+- Create: `vgl/core/__init__.py`
+- Create: `vgl/core/errors.py`
+- Create: `vgl/core/schema.py`
 - Test: `tests/core/test_schema.py`
 
 **Step 1: Write the failing schema contract test**
@@ -117,7 +117,7 @@ git commit -m "chore: bootstrap package skeleton"
 ```python
 import pytest
 
-from gnn.core.schema import GraphSchema
+from vgl.core.schema import GraphSchema
 
 
 def test_schema_tracks_node_edge_and_time_metadata():
@@ -152,7 +152,7 @@ Expected: `FAIL` with `ImportError` because `GraphSchema` does not exist yet.
 
 **Step 3: Write minimal errors and schema**
 
-`src/gnn/core/errors.py`
+`vgl/core/errors.py`
 
 ```python
 class GNNError(Exception):
@@ -163,12 +163,12 @@ class SchemaError(GNNError, ValueError):
     pass
 ```
 
-`src/gnn/core/schema.py`
+`vgl/core/schema.py`
 
 ```python
 from dataclasses import dataclass
 
-from gnn.core.errors import SchemaError
+from vgl.core.errors import SchemaError
 
 
 @dataclass(frozen=True, slots=True)
@@ -197,17 +197,17 @@ Expected: `PASS`
 **Step 5: Commit**
 
 ```bash
-git add src/gnn/core/__init__.py src/gnn/core/errors.py src/gnn/core/schema.py tests/core/test_schema.py
+git add vgl/core/__init__.py vgl/core/errors.py vgl/core/schema.py tests/core/test_schema.py
 git commit -m "feat: add graph schema contracts"
 ```
 
 ### Task 3: Implement NodeStore, EdgeStore, and Unified Graph Constructors
 
 **Files:**
-- Create: `src/gnn/core/stores.py`
-- Create: `src/gnn/core/graph.py`
-- Modify: `src/gnn/core/__init__.py`
-- Modify: `src/gnn/__init__.py`
+- Create: `vgl/core/stores.py`
+- Create: `vgl/core/graph.py`
+- Modify: `vgl/core/__init__.py`
+- Modify: `vgl/__init__.py`
 - Test: `tests/core/test_graph_homo.py`
 - Test: `tests/core/test_graph_multi_type.py`
 
@@ -218,7 +218,7 @@ git commit -m "feat: add graph schema contracts"
 ```python
 import torch
 
-from gnn import Graph
+from vgl import Graph
 
 
 def test_homo_graph_exposes_pyg_style_fields():
@@ -239,7 +239,7 @@ def test_homo_graph_exposes_pyg_style_fields():
 ```python
 import torch
 
-from gnn import Graph
+from vgl import Graph
 
 
 def test_hetero_graph_exposes_typed_node_and_edge_stores():
@@ -286,7 +286,7 @@ Expected: `FAIL` with `ImportError` because `Graph` does not exist yet.
 
 **Step 3: Write minimal stores and graph implementation**
 
-`src/gnn/core/stores.py`
+`vgl/core/stores.py`
 
 ```python
 from dataclasses import dataclass, field
@@ -318,13 +318,13 @@ class EdgeStore:
             raise AttributeError(name) from exc
 ```
 
-`src/gnn/core/graph.py`
+`vgl/core/graph.py`
 
 ```python
 from dataclasses import dataclass
 
-from gnn.core.schema import GraphSchema
-from gnn.core.stores import EdgeStore, NodeStore
+from vgl.core.schema import GraphSchema
+from vgl.core.stores import EdgeStore, NodeStore
 
 
 @dataclass(slots=True)
@@ -391,16 +391,16 @@ Expected: `PASS`
 **Step 5: Commit**
 
 ```bash
-git add src/gnn/core/stores.py src/gnn/core/graph.py src/gnn/core/__init__.py src/gnn/__init__.py tests/core/test_graph_homo.py tests/core/test_graph_multi_type.py
+git add vgl/core/stores.py vgl/core/graph.py vgl/core/__init__.py vgl/__init__.py tests/core/test_graph_homo.py tests/core/test_graph_multi_type.py
 git commit -m "feat: add unified graph constructors"
 ```
 
 ### Task 4: Add GraphView, Snapshot, Window, and GraphBatch
 
 **Files:**
-- Create: `src/gnn/core/view.py`
-- Create: `src/gnn/core/batch.py`
-- Modify: `src/gnn/core/graph.py`
+- Create: `vgl/core/view.py`
+- Create: `vgl/core/batch.py`
+- Modify: `vgl/core/graph.py`
 - Test: `tests/core/test_graph_view.py`
 - Test: `tests/core/test_graph_batch.py`
 
@@ -409,8 +409,8 @@ git commit -m "feat: add unified graph constructors"
 ```python
 import torch
 
-from gnn import Graph
-from gnn.core.batch import GraphBatch
+from vgl import Graph
+from vgl.core.batch import GraphBatch
 
 
 def test_snapshot_filters_temporal_edges_without_copying_features():
@@ -449,7 +449,7 @@ Expected: `FAIL` because `snapshot` and `GraphBatch` do not exist yet.
 
 **Step 3: Write minimal view and batch implementation**
 
-`src/gnn/core/view.py`
+`vgl/core/view.py`
 
 ```python
 from dataclasses import dataclass
@@ -463,7 +463,7 @@ class GraphView:
     schema: object
 ```
 
-`src/gnn/core/batch.py`
+`vgl/core/batch.py`
 
 ```python
 from dataclasses import dataclass
@@ -511,18 +511,18 @@ Expected: `PASS`
 **Step 5: Commit**
 
 ```bash
-git add src/gnn/core/view.py src/gnn/core/batch.py src/gnn/core/graph.py tests/core/test_graph_view.py tests/core/test_graph_batch.py
+git add vgl/core/view.py vgl/core/batch.py vgl/core/graph.py tests/core/test_graph_view.py tests/core/test_graph_batch.py
 git commit -m "feat: add graph views and batching"
 ```
 
 ### Task 5: Add Dataset, Sampler, Transform, and Loader Contracts
 
 **Files:**
-- Create: `src/gnn/data/__init__.py`
-- Create: `src/gnn/data/dataset.py`
-- Create: `src/gnn/data/transform.py`
-- Create: `src/gnn/data/sampler.py`
-- Create: `src/gnn/data/loader.py`
+- Create: `vgl/data/__init__.py`
+- Create: `vgl/data/dataset.py`
+- Create: `vgl/data/transform.py`
+- Create: `vgl/data/sampler.py`
+- Create: `vgl/data/loader.py`
 - Test: `tests/data/test_loader.py`
 
 **Step 1: Write the failing data pipeline test**
@@ -530,10 +530,10 @@ git commit -m "feat: add graph views and batching"
 ```python
 import torch
 
-from gnn import Graph
-from gnn.data.dataset import ListDataset
-from gnn.data.loader import Loader
-from gnn.data.sampler import FullGraphSampler
+from vgl import Graph
+from vgl.data.dataset import ListDataset
+from vgl.data.loader import Loader
+from vgl.data.sampler import FullGraphSampler
 
 
 def test_loader_returns_graph_batch_for_list_dataset():
@@ -557,7 +557,7 @@ Expected: `FAIL` because the data pipeline classes do not exist yet.
 
 **Step 3: Write minimal data pipeline implementation**
 
-`src/gnn/data/dataset.py`
+`vgl/data/dataset.py`
 
 ```python
 class ListDataset:
@@ -571,7 +571,7 @@ class ListDataset:
         return self.graphs[index]
 ```
 
-`src/gnn/data/sampler.py`
+`vgl/data/sampler.py`
 
 ```python
 class FullGraphSampler:
@@ -579,10 +579,10 @@ class FullGraphSampler:
         return graph
 ```
 
-`src/gnn/data/loader.py`
+`vgl/data/loader.py`
 
 ```python
-from gnn.core.batch import GraphBatch
+from vgl.core.batch import GraphBatch
 
 
 class Loader:
@@ -610,21 +610,21 @@ Expected: `PASS`
 **Step 5: Commit**
 
 ```bash
-git add src/gnn/data/__init__.py src/gnn/data/dataset.py src/gnn/data/transform.py src/gnn/data/sampler.py src/gnn/data/loader.py tests/data/test_loader.py
+git add vgl/data/__init__.py vgl/data/dataset.py vgl/data/transform.py vgl/data/sampler.py vgl/data/loader.py tests/data/test_loader.py
 git commit -m "feat: add dataset and loader contracts"
 ```
 
 ### Task 6: Implement MessagePassing and Reference Convolution Layers
 
 **Files:**
-- Create: `src/gnn/nn/__init__.py`
-- Create: `src/gnn/nn/message_passing.py`
-- Create: `src/gnn/nn/conv/__init__.py`
-- Create: `src/gnn/nn/conv/gcn.py`
-- Create: `src/gnn/nn/conv/sage.py`
-- Create: `src/gnn/nn/conv/gat.py`
-- Create: `src/gnn/nn/hetero.py`
-- Create: `src/gnn/nn/temporal.py`
+- Create: `vgl/nn/__init__.py`
+- Create: `vgl/nn/message_passing.py`
+- Create: `vgl/nn/conv/__init__.py`
+- Create: `vgl/nn/conv/gcn.py`
+- Create: `vgl/nn/conv/sage.py`
+- Create: `vgl/nn/conv/gat.py`
+- Create: `vgl/nn/hetero.py`
+- Create: `vgl/nn/temporal.py`
 - Test: `tests/nn/test_message_passing.py`
 - Test: `tests/nn/test_convs.py`
 
@@ -633,9 +633,9 @@ git commit -m "feat: add dataset and loader contracts"
 ```python
 import torch
 
-from gnn import Graph
-from gnn.nn.conv.gcn import GCNConv
-from gnn.nn.conv.sage import SAGEConv
+from vgl import Graph
+from vgl.nn.conv.gcn import GCNConv
+from vgl.nn.conv.sage import SAGEConv
 
 
 def test_gcn_conv_accepts_graph_input():
@@ -668,7 +668,7 @@ Expected: `FAIL` because the operator modules do not exist yet.
 
 **Step 3: Write minimal message passing core and two operators**
 
-`src/gnn/nn/message_passing.py`
+`vgl/nn/message_passing.py`
 
 ```python
 import torch
@@ -695,12 +695,12 @@ class MessagePassing(nn.Module):
         return aggr_out
 ```
 
-`src/gnn/nn/conv/gcn.py`
+`vgl/nn/conv/gcn.py`
 
 ```python
 from torch import nn
 
-from gnn.nn.message_passing import MessagePassing
+from vgl.nn.message_passing import MessagePassing
 
 
 class GCNConv(MessagePassing):
@@ -712,13 +712,13 @@ class GCNConv(MessagePassing):
         return self.linear(aggr_out)
 ```
 
-`src/gnn/nn/conv/sage.py`
+`vgl/nn/conv/sage.py`
 
 ```python
 import torch
 from torch import nn
 
-from gnn.nn.message_passing import MessagePassing
+from vgl.nn.message_passing import MessagePassing
 
 
 class SAGEConv(MessagePassing):
@@ -745,19 +745,19 @@ Expected: `PASS`
 
 ```bash
 python -m pytest tests/nn -v
-git add src/gnn/nn src/gnn/__init__.py tests/nn
+git add vgl/nn vgl/__init__.py tests/nn
 git commit -m "feat: add message passing and reference convs"
 ```
 
 ### Task 7: Add Tasks, Metrics, Evaluator, and Trainer
 
 **Files:**
-- Create: `src/gnn/train/__init__.py`
-- Create: `src/gnn/train/task.py`
-- Create: `src/gnn/train/tasks.py`
-- Create: `src/gnn/train/metrics.py`
-- Create: `src/gnn/train/evaluator.py`
-- Create: `src/gnn/train/trainer.py`
+- Create: `vgl/train/__init__.py`
+- Create: `vgl/train/task.py`
+- Create: `vgl/train/tasks.py`
+- Create: `vgl/train/metrics.py`
+- Create: `vgl/train/evaluator.py`
+- Create: `vgl/train/trainer.py`
 - Test: `tests/train/test_tasks.py`
 - Test: `tests/train/test_trainer.py`
 
@@ -767,9 +767,9 @@ git commit -m "feat: add message passing and reference convs"
 import torch
 from torch import nn
 
-from gnn import Graph
-from gnn.train.tasks import NodeClassificationTask
-from gnn.train.trainer import Trainer
+from vgl import Graph
+from vgl.train.tasks import NodeClassificationTask
+from vgl.train.trainer import Trainer
 
 
 class LinearNodeModel(nn.Module):
@@ -821,7 +821,7 @@ Expected: `FAIL` because the training layer does not exist yet.
 
 **Step 3: Write minimal task and trainer loop**
 
-`src/gnn/train/tasks.py`
+`vgl/train/tasks.py`
 
 ```python
 import torch.nn.functional as F
@@ -840,7 +840,7 @@ class NodeClassificationTask:
         return F.cross_entropy(logits[mask], target[mask])
 ```
 
-`src/gnn/train/trainer.py`
+`vgl/train/trainer.py`
 
 ```python
 class Trainer:
@@ -870,17 +870,17 @@ Expected: `PASS`
 
 ```bash
 python -m pytest tests/train -v
-git add src/gnn/train tests/train
+git add vgl/train tests/train
 git commit -m "feat: add training task and trainer layer"
 ```
 
 ### Task 8: Add PyG and DGL Compatibility Adapters
 
 **Files:**
-- Create: `src/gnn/compat/__init__.py`
-- Create: `src/gnn/compat/pyg.py`
-- Create: `src/gnn/compat/dgl.py`
-- Modify: `src/gnn/core/graph.py`
+- Create: `vgl/compat/__init__.py`
+- Create: `vgl/compat/pyg.py`
+- Create: `vgl/compat/dgl.py`
+- Modify: `vgl/core/graph.py`
 - Test: `tests/compat/test_pyg_adapter.py`
 - Test: `tests/compat/test_dgl_adapter.py`
 
@@ -890,7 +890,7 @@ git commit -m "feat: add training task and trainer layer"
 import pytest
 import torch
 
-from gnn import Graph
+from vgl import Graph
 
 
 def test_graph_round_trips_to_pyg_data():
@@ -928,10 +928,10 @@ Expected: `FAIL` because the compatibility entrypoints do not exist yet.
 
 **Step 3: Write lazy compatibility adapters**
 
-`src/gnn/compat/pyg.py`
+`vgl/compat/pyg.py`
 
 ```python
-from gnn.core.graph import Graph
+from vgl.core.graph import Graph
 
 
 def from_pyg(data):
@@ -944,12 +944,12 @@ def to_pyg(graph):
     return Data(x=graph.x, edge_index=graph.edge_index, y=getattr(graph, "y", None))
 ```
 
-`src/gnn/compat/dgl.py`
+`vgl/compat/dgl.py`
 
 ```python
 import torch
 
-from gnn.core.graph import Graph
+from vgl.core.graph import Graph
 
 
 def from_dgl(dgl_graph):
@@ -981,7 +981,7 @@ Expected:
 **Step 5: Commit**
 
 ```bash
-git add src/gnn/compat src/gnn/core/graph.py tests/compat
+git add vgl/compat vgl/core/graph.py tests/compat
 git commit -m "feat: add pyg and dgl adapters"
 ```
 
@@ -1004,9 +1004,9 @@ git commit -m "feat: add pyg and dgl adapters"
 import torch
 from torch import nn
 
-from gnn import Graph
-from gnn.train.tasks import NodeClassificationTask
-from gnn.train.trainer import Trainer
+from vgl import Graph
+from vgl.train.tasks import NodeClassificationTask
+from vgl.train.trainer import Trainer
 
 
 class TinyModel(nn.Module):
@@ -1047,10 +1047,10 @@ Expected: `FAIL` until the full training path is wired together cleanly.
 ```python
 import torch
 
-from gnn import Graph
-from gnn.nn.conv.gcn import GCNConv
-from gnn.train.tasks import NodeClassificationTask
-from gnn.train.trainer import Trainer
+from vgl import Graph
+from vgl.nn.conv.gcn import GCNConv
+from vgl.train.tasks import NodeClassificationTask
+from vgl.train.trainer import Trainer
 ```
 
 Docs should explain:
@@ -1064,7 +1064,7 @@ Docs should explain:
 ```bash
 python -m pytest -v
 python -m ruff check .
-python -m mypy src
+python -m mypy vgl
 ```
 
 Expected:
@@ -1089,7 +1089,7 @@ git commit -m "docs: add examples and integration coverage"
 
 **Step 1: Verify the public API list matches the implementation**
 
-Run: `python -c "import gnn; print(sorted(name for name in dir(gnn) if not name.startswith('_')))"`.
+Run: `python -c "import vgl; print(sorted(name for name in dir(gnn) if not name.startswith('_')))"`.
 Expected: only intended public objects are exported.
 
 **Step 2: Verify the contract tests still describe the current API**
@@ -1124,3 +1124,4 @@ git commit -m "chore: finalize api verification docs"
 - Do not add more public exports than the design document allows.
 - If a new feature cannot be expressed cleanly through the unified `Graph` semantics, revisit the design before implementing it.
 - Prefer contract tests before implementation changes for every public API adjustment.
+

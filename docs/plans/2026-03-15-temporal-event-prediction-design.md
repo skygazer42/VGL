@@ -209,9 +209,9 @@ These belong to later phases and should not distort the first stable temporal tr
 
 Phase 3 will mostly affect:
 
-- `src/gnn/core/`
-- `src/gnn/data/`
-- `src/gnn/train/`
+- `vgl/core/`
+- `vgl/data/`
+- `vgl/train/`
 - `examples/temporal/`
 - `docs/`
 - `tests/data/`
@@ -241,3 +241,4 @@ Phase 3 is complete when:
 ## Next Step
 
 The next step is to create a detailed implementation plan with exact files, tests, commands, and commit checkpoints.
+

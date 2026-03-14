@@ -1,4 +1,4 @@
-# GNN Framework Design
+# VGL Framework Design
 
 **Date:** 2026-03-14
 **Status:** Approved for planning
@@ -367,3 +367,4 @@ Mitigation:
 ## Next Step
 
 The next step is to turn this design into an implementation plan with exact files, tests, commands, and staged milestones.
+

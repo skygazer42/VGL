@@ -13,9 +13,9 @@
 ### Task 1: Add SampleRecord and Rich GraphBatch Metadata
 
 **Files:**
-- Modify: `src/gnn/core/batch.py`
-- Create: `src/gnn/data/sample.py`
-- Modify: `src/gnn/core/__init__.py`
+- Modify: `vgl/core/batch.py`
+- Create: `vgl/data/sample.py`
+- Modify: `vgl/core/__init__.py`
 - Test: `tests/core/test_graph_batch_graph_classification.py`
 
 **Step 1: Write the failing batch metadata test**
@@ -23,9 +23,9 @@
 ```python
 import torch
 
-from gnn import Graph
-from gnn.core.batch import GraphBatch
-from gnn.data.sample import SampleRecord
+from vgl import Graph
+from vgl.core.batch import GraphBatch
+from vgl.data.sample import SampleRecord
 
 
 def test_graph_batch_tracks_graph_ptr_labels_and_metadata():
@@ -53,7 +53,7 @@ Expected: `FAIL` because `SampleRecord` and rich batch metadata do not exist yet
 
 **Step 3: Write minimal implementation**
 
-`src/gnn/data/sample.py`
+`vgl/data/sample.py`
 
 ```python
 from dataclasses import dataclass, field
@@ -68,7 +68,7 @@ class SampleRecord:
     subgraph_seed: object | None = None
 ```
 
-Update `src/gnn/core/batch.py` so `GraphBatch` can be built from `SampleRecord` objects and stores:
+Update `vgl/core/batch.py` so `GraphBatch` can be built from `SampleRecord` objects and stores:
 
 - `graph_ptr`
 - `labels`
@@ -84,16 +84,16 @@ Expected: `PASS`
 **Step 5: Commit**
 
 ```bash
-git add src/gnn/core/batch.py src/gnn/data/sample.py src/gnn/core/__init__.py tests/core/test_graph_batch_graph_classification.py
+git add vgl/core/batch.py vgl/data/sample.py vgl/core/__init__.py tests/core/test_graph_batch_graph_classification.py
 git commit -m "feat: add graph classification batch metadata"
 ```
 
 ### Task 2: Upgrade Loader to Collate SampleRecord Inputs
 
 **Files:**
-- Modify: `src/gnn/data/loader.py`
-- Modify: `src/gnn/data/dataset.py`
-- Modify: `src/gnn/data/__init__.py`
+- Modify: `vgl/data/loader.py`
+- Modify: `vgl/data/dataset.py`
+- Modify: `vgl/data/__init__.py`
 - Test: `tests/data/test_graph_classification_loader.py`
 
 **Step 1: Write the failing loader test**
@@ -101,11 +101,11 @@ git commit -m "feat: add graph classification batch metadata"
 ```python
 import torch
 
-from gnn import Graph
-from gnn.data.dataset import ListDataset
-from gnn.data.loader import Loader
-from gnn.data.sample import SampleRecord
-from gnn.data.sampler import FullGraphSampler
+from vgl import Graph
+from vgl.data.dataset import ListDataset
+from vgl.data.loader import Loader
+from vgl.data.sample import SampleRecord
+from vgl.data.sampler import FullGraphSampler
 
 
 def test_loader_collates_graph_samples_with_metadata_labels():
@@ -151,15 +151,15 @@ Expected: `PASS`
 **Step 5: Commit**
 
 ```bash
-git add src/gnn/data/loader.py src/gnn/data/dataset.py src/gnn/data/__init__.py tests/data/test_graph_classification_loader.py
+git add vgl/data/loader.py vgl/data/dataset.py vgl/data/__init__.py tests/data/test_graph_classification_loader.py
 git commit -m "feat: collate graph classification samples"
 ```
 
 ### Task 3: Add Graph-Level Readout Utilities
 
 **Files:**
-- Create: `src/gnn/nn/readout.py`
-- Modify: `src/gnn/nn/__init__.py`
+- Create: `vgl/nn/readout.py`
+- Modify: `vgl/nn/__init__.py`
 - Test: `tests/nn/test_readout.py`
 
 **Step 1: Write the failing readout test**
@@ -167,7 +167,7 @@ git commit -m "feat: collate graph classification samples"
 ```python
 import torch
 
-from gnn.nn.readout import global_mean_pool, global_sum_pool, global_max_pool
+from vgl.nn.readout import global_mean_pool, global_sum_pool, global_max_pool
 
 
 def test_global_mean_pool_reduces_node_embeddings_per_graph():
@@ -202,15 +202,15 @@ Expected: `PASS`
 **Step 5: Commit**
 
 ```bash
-git add src/gnn/nn/readout.py src/gnn/nn/__init__.py tests/nn/test_readout.py
+git add vgl/nn/readout.py vgl/nn/__init__.py tests/nn/test_readout.py
 git commit -m "feat: add graph readout utilities"
 ```
 
 ### Task 4: Add GraphClassificationTask for Graph and Metadata Labels
 
 **Files:**
-- Modify: `src/gnn/train/tasks.py`
-- Modify: `src/gnn/train/__init__.py`
+- Modify: `vgl/train/tasks.py`
+- Modify: `vgl/train/__init__.py`
 - Test: `tests/train/test_graph_classification_task.py`
 
 **Step 1: Write the failing task test**
@@ -218,7 +218,7 @@ git commit -m "feat: add graph readout utilities"
 ```python
 import torch
 
-from gnn.train.tasks import GraphClassificationTask
+from vgl.train.tasks import GraphClassificationTask
 
 
 class FakeBatch:
@@ -251,7 +251,7 @@ Expected: `FAIL` because `GraphClassificationTask` does not exist yet.
 
 **Step 3: Write minimal implementation**
 
-Extend `src/gnn/train/tasks.py` with `GraphClassificationTask` that:
+Extend `vgl/train/tasks.py` with `GraphClassificationTask` that:
 
 - reads labels from `batch.labels` when `label_source="graph"`
 - reads labels from `batch.metadata` when `label_source="metadata"`
@@ -267,14 +267,14 @@ Expected: `PASS`
 **Step 5: Commit**
 
 ```bash
-git add src/gnn/train/tasks.py src/gnn/train/__init__.py tests/train/test_graph_classification_task.py
+git add vgl/train/tasks.py vgl/train/__init__.py tests/train/test_graph_classification_task.py
 git commit -m "feat: add graph classification task"
 ```
 
 ### Task 5: Add Graph Classification Model Path and Trainer Support
 
 **Files:**
-- Modify: `src/gnn/train/trainer.py`
+- Modify: `vgl/train/trainer.py`
 - Test: `tests/train/test_graph_classification_trainer.py`
 
 **Step 1: Write the failing trainer test**
@@ -283,8 +283,8 @@ git commit -m "feat: add graph classification task"
 import torch
 from torch import nn
 
-from gnn.train.tasks import GraphClassificationTask
-from gnn.train.trainer import Trainer
+from vgl.train.tasks import GraphClassificationTask
+from vgl.train.trainer import Trainer
 
 
 class FakeBatch:
@@ -332,14 +332,14 @@ Expected: `PASS`
 **Step 5: Commit**
 
 ```bash
-git add src/gnn/train/trainer.py tests/train/test_graph_classification_trainer.py
+git add vgl/train/trainer.py tests/train/test_graph_classification_trainer.py
 git commit -m "feat: support graph classification in trainer"
 ```
 
 ### Task 6: Add Minimal Subgraph Graph-Classification Sampling
 
 **Files:**
-- Modify: `src/gnn/data/sampler.py`
+- Modify: `vgl/data/sampler.py`
 - Test: `tests/data/test_subgraph_sampler.py`
 
 **Step 1: Write the failing sampler test**
@@ -347,9 +347,9 @@ git commit -m "feat: support graph classification in trainer"
 ```python
 import torch
 
-from gnn import Graph
-from gnn.data.sample import SampleRecord
-from gnn.data.sampler import NodeSeedSubgraphSampler
+from vgl import Graph
+from vgl.data.sample import SampleRecord
+from vgl.data.sampler import NodeSeedSubgraphSampler
 
 
 def test_node_seed_subgraph_sampler_returns_sample_record():
@@ -384,7 +384,7 @@ Expected: `PASS`
 **Step 5: Commit**
 
 ```bash
-git add src/gnn/data/sampler.py tests/data/test_subgraph_sampler.py
+git add vgl/data/sampler.py tests/data/test_subgraph_sampler.py
 git commit -m "feat: add minimal subgraph graph-classification sampler"
 ```
 
@@ -400,12 +400,12 @@ git commit -m "feat: add minimal subgraph graph-classification sampler"
 import torch
 from torch import nn
 
-from gnn import Graph
-from gnn.core.batch import GraphBatch
-from gnn.data.sample import SampleRecord
-from gnn.nn.readout import global_mean_pool
-from gnn.train.tasks import GraphClassificationTask
-from gnn.train.trainer import Trainer
+from vgl import Graph
+from vgl.core.batch import GraphBatch
+from vgl.data.sample import SampleRecord
+from vgl.nn.readout import global_mean_pool
+from vgl.train.tasks import GraphClassificationTask
+from vgl.train.trainer import Trainer
 
 
 class TinyGraphClassifier(nn.Module):
@@ -473,11 +473,11 @@ git commit -m "feat: add many-graph classification flow"
 import torch
 from torch import nn
 
-from gnn import Graph
-from gnn.data.sample import SampleRecord
-from gnn.nn.readout import global_mean_pool
-from gnn.train.tasks import GraphClassificationTask
-from gnn.train.trainer import Trainer
+from vgl import Graph
+from vgl.data.sample import SampleRecord
+from vgl.nn.readout import global_mean_pool
+from vgl.train.tasks import GraphClassificationTask
+from vgl.train.trainer import Trainer
 
 
 class TinyGraphClassifier(nn.Module):
@@ -563,7 +563,7 @@ Run:
 ```bash
 python -m pytest -v
 python -m ruff check .
-python -m mypy src
+python -m mypy vgl
 python examples/homo/graph_classification.py
 python examples/hetero/graph_classification.py
 ```
@@ -596,3 +596,4 @@ git commit -m "docs: document graph classification training"
 - Do not broaden this phase into link prediction or temporal prediction.
 - Keep all new behavior driven by tests first.
 - Preserve node classification APIs and examples unless a regression test justifies a change.
+

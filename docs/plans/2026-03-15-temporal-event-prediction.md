@@ -13,9 +13,9 @@
 ### Task 1: Add Temporal Event Record and Batch Contracts
 
 **Files:**
-- Modify: `src/gnn/data/sample.py`
-- Modify: `src/gnn/core/batch.py`
-- Modify: `src/gnn/core/__init__.py`
+- Modify: `vgl/data/sample.py`
+- Modify: `vgl/core/batch.py`
+- Modify: `vgl/core/__init__.py`
 - Test: `tests/core/test_temporal_event_batch.py`
 
 **Step 1: Write the failing batch contract test**
@@ -23,9 +23,9 @@
 ```python
 import torch
 
-from gnn import Graph
-from gnn.core.batch import TemporalEventBatch
-from gnn.data.sample import TemporalEventRecord
+from vgl import Graph
+from vgl.core.batch import TemporalEventBatch
+from vgl.data.sample import TemporalEventRecord
 
 
 def test_temporal_event_batch_tracks_fields_and_history_views():
@@ -62,7 +62,7 @@ Expected: `FAIL` because `TemporalEventRecord`, `TemporalEventBatch`, or `histor
 
 **Step 3: Write minimal implementation**
 
-`src/gnn/data/sample.py`
+`vgl/data/sample.py`
 
 ```python
 from dataclasses import dataclass, field
@@ -81,7 +81,7 @@ class TemporalEventRecord:
     sample_id: str | None = None
 ```
 
-Update `src/gnn/core/batch.py` with a new batch type:
+Update `vgl/core/batch.py` with a new batch type:
 
 ```python
 @dataclass(slots=True)
@@ -116,7 +116,7 @@ class TemporalEventBatch:
         return self.graph.snapshot(self.timestamp[index].item())
 ```
 
-Export `TemporalEventBatch` from `src/gnn/core/__init__.py`.
+Export `TemporalEventBatch` from `vgl/core/__init__.py`.
 
 **Step 4: Run test to verify it passes**
 
@@ -126,15 +126,15 @@ Expected: `PASS`
 **Step 5: Commit**
 
 ```bash
-git add src/gnn/data/sample.py src/gnn/core/batch.py src/gnn/core/__init__.py tests/core/test_temporal_event_batch.py
+git add vgl/data/sample.py vgl/core/batch.py vgl/core/__init__.py tests/core/test_temporal_event_batch.py
 git commit -m "feat: add temporal event batch contract"
 ```
 
 ### Task 2: Teach Loader to Collate Temporal Event Records
 
 **Files:**
-- Modify: `src/gnn/data/loader.py`
-- Modify: `src/gnn/data/__init__.py`
+- Modify: `vgl/data/loader.py`
+- Modify: `vgl/data/__init__.py`
 - Test: `tests/data/test_temporal_event_loader.py`
 
 **Step 1: Write the failing loader tests**
@@ -143,11 +143,11 @@ git commit -m "feat: add temporal event batch contract"
 import pytest
 import torch
 
-from gnn import Graph
-from gnn.data.dataset import ListDataset
-from gnn.data.loader import Loader
-from gnn.data.sample import TemporalEventRecord
-from gnn.data.sampler import FullGraphSampler
+from vgl import Graph
+from vgl.data.dataset import ListDataset
+from vgl.data.loader import Loader
+from vgl.data.sample import TemporalEventRecord
+from vgl.data.sampler import FullGraphSampler
 
 
 def _temporal_graph():
@@ -199,11 +199,11 @@ Expected: `FAIL` because `Loader` does not yet detect temporal event records.
 
 **Step 3: Write minimal implementation**
 
-Update `src/gnn/data/loader.py`:
+Update `vgl/data/loader.py`:
 
 ```python
-from gnn.core.batch import GraphBatch, TemporalEventBatch
-from gnn.data.sample import TemporalEventRecord
+from vgl.core.batch import GraphBatch, TemporalEventBatch
+from vgl.data.sample import TemporalEventRecord
 
 
 def _build_batch(self, items):
@@ -218,7 +218,7 @@ def _build_batch(self, items):
     return GraphBatch.from_graphs(items)
 ```
 
-Update `src/gnn/data/__init__.py` so `TemporalEventRecord` is exported next to `SampleRecord`.
+Update `vgl/data/__init__.py` so `TemporalEventRecord` is exported next to `SampleRecord`.
 
 **Step 4: Run test to verify it passes**
 
@@ -228,15 +228,15 @@ Expected: `PASS`
 **Step 5: Commit**
 
 ```bash
-git add src/gnn/data/loader.py src/gnn/data/__init__.py tests/data/test_temporal_event_loader.py
+git add vgl/data/loader.py vgl/data/__init__.py tests/data/test_temporal_event_loader.py
 git commit -m "feat: add temporal event loader collation"
 ```
 
 ### Task 3: Add Temporal Event Prediction Task and Trainer Coverage
 
 **Files:**
-- Modify: `src/gnn/train/tasks.py`
-- Modify: `src/gnn/train/__init__.py`
+- Modify: `vgl/train/tasks.py`
+- Modify: `vgl/train/__init__.py`
 - Test: `tests/train/test_temporal_event_task.py`
 - Test: `tests/train/test_temporal_event_trainer.py`
 
@@ -247,11 +247,11 @@ import pytest
 import torch
 from torch import nn
 
-from gnn import Graph
-from gnn.core.batch import TemporalEventBatch
-from gnn.data.sample import TemporalEventRecord
-from gnn.train.tasks import TemporalEventPredictionTask
-from gnn.train.trainer import Trainer
+from vgl import Graph
+from vgl.core.batch import TemporalEventBatch
+from vgl.data.sample import TemporalEventRecord
+from vgl.train.tasks import TemporalEventPredictionTask
+from vgl.train.trainer import Trainer
 
 
 def _batch():
@@ -324,7 +324,7 @@ Expected: `FAIL` because `TemporalEventPredictionTask` does not exist yet.
 
 **Step 3: Write minimal implementation**
 
-Update `src/gnn/train/tasks.py`:
+Update `vgl/train/tasks.py`:
 
 ```python
 class TemporalEventPredictionTask(Task):
@@ -340,7 +340,7 @@ class TemporalEventPredictionTask(Task):
         return F.cross_entropy(logits, batch.labels)
 ```
 
-Export the task from `src/gnn/train/__init__.py`.
+Export the task from `vgl/train/__init__.py`.
 
 **Step 4: Run tests to verify they pass**
 
@@ -350,7 +350,7 @@ Expected: `PASS`
 **Step 5: Commit**
 
 ```bash
-git add src/gnn/train/tasks.py src/gnn/train/__init__.py tests/train/test_temporal_event_task.py tests/train/test_temporal_event_trainer.py
+git add vgl/train/tasks.py vgl/train/__init__.py tests/train/test_temporal_event_task.py tests/train/test_temporal_event_trainer.py
 git commit -m "feat: add temporal event prediction task"
 ```
 
@@ -369,13 +369,13 @@ git commit -m "feat: add temporal event prediction task"
 import torch
 from torch import nn
 
-from gnn import Graph
-from gnn.data.dataset import ListDataset
-from gnn.data.loader import Loader
-from gnn.data.sample import TemporalEventRecord
-from gnn.data.sampler import FullGraphSampler
-from gnn.train.tasks import TemporalEventPredictionTask
-from gnn.train.trainer import Trainer
+from vgl import Graph
+from vgl.data.dataset import ListDataset
+from vgl.data.loader import Loader
+from vgl.data.sample import TemporalEventRecord
+from vgl.data.sampler import FullGraphSampler
+from vgl.train.tasks import TemporalEventPredictionTask
+from vgl.train.trainer import Trainer
 
 
 class TinyTemporalEventModel(nn.Module):
@@ -469,7 +469,7 @@ Expected: `All checks passed`
 
 **Step 3: Run type checking**
 
-Run: `python -m mypy src`
+Run: `python -m mypy vgl`
 Expected: `Success: no issues found`
 
 **Step 4: Re-run the temporal example**
@@ -483,3 +483,4 @@ Expected: prints `{'epochs': 1}`
 git add .
 git commit -m "chore: verify temporal event prediction flow"
 ```
+

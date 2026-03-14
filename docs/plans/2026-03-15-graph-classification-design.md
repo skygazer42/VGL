@@ -209,12 +209,12 @@ These belong to later phases and should not distort the graph classification API
 
 Phase 2 will mostly affect:
 
-- `src/gnn/core/batch.py`
-- `src/gnn/data/loader.py`
-- `src/gnn/data/sampler.py`
-- `src/gnn/nn/`
-- `src/gnn/train/tasks.py`
-- `src/gnn/train/trainer.py`
+- `vgl/core/batch.py`
+- `vgl/data/loader.py`
+- `vgl/data/sampler.py`
+- `vgl/nn/`
+- `vgl/train/tasks.py`
+- `vgl/train/trainer.py`
 - `tests/data/`
 - `tests/train/`
 - `tests/integration/`
@@ -242,3 +242,4 @@ Phase 2 is complete when:
 ## Next Step
 
 The next step is to create a detailed implementation plan with exact files, tests, commands, and commit checkpoints.
+

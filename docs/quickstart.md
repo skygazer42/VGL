@@ -1,6 +1,6 @@
 # Quickstart
 
-`gnn` is a PyTorch-first graph learning package with one core `Graph` abstraction.
+`vgl` is a PyTorch-first graph learning package with one core `Graph` abstraction.
 
 The smallest workflow is:
 
@@ -72,3 +72,4 @@ task = TemporalEventPredictionTask(target="label")
 trainer = Trainer(model=model, task=task, optimizer=torch.optim.Adam, lr=1e-3, max_epochs=10)
 trainer.fit(loader)
 ```
+
