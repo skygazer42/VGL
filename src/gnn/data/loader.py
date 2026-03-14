@@ -1,4 +1,5 @@
-from gnn.core.batch import GraphBatch
+from gnn.core.batch import GraphBatch, TemporalEventBatch
+from gnn.data.sample import TemporalEventRecord
 
 
 class Loader:
@@ -10,6 +11,8 @@ class Loader:
         self.label_key = label_key
 
     def _build_batch(self, items):
+        if items and isinstance(items[0], TemporalEventRecord):
+            return TemporalEventBatch.from_records(items)
         if items and hasattr(items[0], "graph") and self.label_source is not None and self.label_key is not None:
             return GraphBatch.from_samples(
                 items,
