@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 
-from gnn.core.schema import GraphSchema
-from gnn.core.stores import EdgeStore, NodeStore
+from vgl.core.schema import GraphSchema
+from vgl.core.stores import EdgeStore, NodeStore
 
 
 @dataclass(slots=True)
@@ -47,3 +47,4 @@ class GraphView:
     @property
     def edata(self):
         return self.edges[self._default_edge_type()].data
+

@@ -1,7 +1,7 @@
 import torch
 import torch.nn.functional as F
 
-from gnn.train.task import Task
+from vgl.train.task import Task
 
 
 class NodeClassificationTask(Task):
@@ -65,3 +65,4 @@ class TemporalEventPredictionTask(Task):
     def loss(self, batch, logits, stage):
         del stage
         return F.cross_entropy(logits, batch.labels)
+

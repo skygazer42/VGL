@@ -1,6 +1,6 @@
 import torch
 
-from gnn.core.graph import Graph
+from vgl.core.graph import Graph
 
 
 def from_dgl(dgl_graph):
@@ -19,3 +19,4 @@ def to_dgl(graph):
     for key, value in graph.ndata.items():
         dgl_graph.ndata[key] = value
     return dgl_graph
+

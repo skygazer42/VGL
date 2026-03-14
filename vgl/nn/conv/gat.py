@@ -1,6 +1,6 @@
 from torch import nn
 
-from gnn.nn.message_passing import MessagePassing
+from vgl.nn.message_passing import MessagePassing
 
 
 class GATConv(MessagePassing):
@@ -10,3 +10,4 @@ class GATConv(MessagePassing):
 
     def update(self, aggr_out):
         return self.linear(aggr_out)
+

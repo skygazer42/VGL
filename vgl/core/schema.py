@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from gnn.core.errors import SchemaError
+from vgl.core.errors import SchemaError
 
 
 @dataclass(frozen=True, slots=True)
@@ -19,3 +19,4 @@ class GraphSchema:
         if any(self.time_attr in fields for fields in self.edge_features.values()):
             return
         raise SchemaError(f"time_attr '{self.time_attr}' is not declared in schema")
+

@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 
-from gnn.nn.message_passing import MessagePassing
+from vgl.nn.message_passing import MessagePassing
 
 
 class SAGEConv(MessagePassing):
@@ -18,3 +18,4 @@ class SAGEConv(MessagePassing):
 
         neigh = super().forward(x, edge_index)
         return self.linear(torch.cat([x, neigh], dim=-1))
+

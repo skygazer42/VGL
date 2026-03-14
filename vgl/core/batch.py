@@ -3,11 +3,11 @@ from typing import TYPE_CHECKING
 
 import torch
 
-from gnn.core.graph import Graph
+from vgl.core.graph import Graph
 
 if TYPE_CHECKING:
-    from gnn.data.sample import SampleRecord
-    from gnn.data.sample import TemporalEventRecord
+    from vgl.data.sample import SampleRecord
+    from vgl.data.sample import TemporalEventRecord
 
 
 @dataclass(slots=True)
@@ -90,3 +90,4 @@ class TemporalEventBatch:
 
     def history_graph(self, index: int):
         return self.graph.snapshot(self.timestamp[index].item())
+

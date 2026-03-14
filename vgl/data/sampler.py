@@ -1,4 +1,4 @@
-from gnn.data.sample import SampleRecord
+from vgl.data.sample import SampleRecord
 
 
 class FullGraphSampler:
@@ -16,3 +16,4 @@ class NodeSeedSubgraphSampler:
             source_graph_id=metadata.get("source_graph_id"),
             subgraph_seed=metadata.get("seed"),
         )
+

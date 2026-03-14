@@ -3,7 +3,7 @@ requires = ["hatchling>=1.26.0"]
 build-backend = "hatchling.build"
 
 [project]
-name = "gnn"
+name = "vgl"
 version = "0.1.0"
 description = "Unified graph learning framework with PyTorch"
 readme = "README.md"
@@ -21,7 +21,6 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-pythonpath = ["src"]
 testpaths = ["tests"]
 
 [tool.mypy]

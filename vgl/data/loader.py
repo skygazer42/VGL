@@ -1,5 +1,5 @@
-from gnn.core.batch import GraphBatch, TemporalEventBatch
-from gnn.data.sample import TemporalEventRecord
+from vgl.core.batch import GraphBatch, TemporalEventBatch
+from vgl.data.sample import TemporalEventRecord
 
 
 class Loader:
@@ -30,3 +30,4 @@ class Loader:
                 batch = []
         if batch:
             yield self._build_batch(batch)
+

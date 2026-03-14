@@ -1,4 +1,4 @@
-from gnn.core.graph import Graph
+from vgl.core.graph import Graph
 
 
 def from_pyg(data):
@@ -20,3 +20,4 @@ def to_pyg(graph):
     if "y" in graph.nodes["node"].data:
         kwargs["y"] = graph.y
     return Data(**kwargs)
+

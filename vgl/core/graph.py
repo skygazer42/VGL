@@ -1,8 +1,8 @@
 from dataclasses import dataclass
 
-from gnn.core.schema import GraphSchema
-from gnn.core.stores import EdgeStore, NodeStore
-from gnn.core.view import GraphView
+from vgl.core.schema import GraphSchema
+from vgl.core.stores import EdgeStore, NodeStore
+from vgl.core.view import GraphView
 
 
 @dataclass(slots=True)
@@ -64,23 +64,23 @@ class Graph:
 
     @classmethod
     def from_pyg(cls, data):
-        from gnn.compat.pyg import from_pyg
+        from vgl.compat.pyg import from_pyg
 
         return from_pyg(data)
 
     @classmethod
     def from_dgl(cls, graph):
-        from gnn.compat.dgl import from_dgl
+        from vgl.compat.dgl import from_dgl
 
         return from_dgl(graph)
 
     def to_pyg(self):
-        from gnn.compat.pyg import to_pyg
+        from vgl.compat.pyg import to_pyg
 
         return to_pyg(self)
 
     def to_dgl(self):
-        from gnn.compat.dgl import to_dgl
+        from vgl.compat.dgl import to_dgl
 
         return to_dgl(self)
 
@@ -128,3 +128,4 @@ class Graph:
     @property
     def edata(self):
         return self.edges[("node", "to", "node")].data
+
