@@ -22,10 +22,21 @@ class NodeClassificationTask(Task):
         raise ValueError("node_type is required for multi-type node classification")
 
     def loss(self, graph, logits, stage):
+        return F.cross_entropy(
+            self.predictions_for_metrics(graph, logits, stage),
+            self.targets(graph, stage),
+        )
+
+    def targets(self, graph, stage):
         node_data = self._node_data(graph)
         mask = node_data[f"{stage}_mask"]
         target = node_data[self.target]
-        return F.cross_entropy(logits[mask], target[mask])
+        return target[mask]
+
+    def predictions_for_metrics(self, graph, predictions, stage):
+        node_data = self._node_data(graph)
+        mask = node_data[f"{stage}_mask"]
+        return predictions[mask]
 
 
 class GraphClassificationTask(Task):
@@ -53,6 +64,10 @@ class GraphClassificationTask(Task):
         target = self._targets(batch)
         return F.cross_entropy(logits, target)
 
+    def targets(self, batch, stage):
+        del stage
+        return self._targets(batch)
+
 
 class LinkPredictionTask(Task):
     def __init__(self, target="label", loss="binary_cross_entropy", metrics=None):
@@ -63,13 +78,21 @@ class LinkPredictionTask(Task):
         self.metrics = metrics or []
 
     def loss(self, batch, logits, stage):
-        del stage
-        if logits.ndim == 2 and logits.size(-1) == 1:
-            logits = logits.squeeze(-1)
-        if logits.ndim != 1 or logits.size(0) != batch.labels.size(0):
-            raise ValueError("LinkPredictionTask expects one logit per candidate edge")
-        targets = batch.labels.to(dtype=logits.dtype)
+        logits = self.predictions_for_metrics(batch, logits, stage=stage)
+        targets = self.targets(batch, stage=stage).to(dtype=logits.dtype)
         return F.binary_cross_entropy_with_logits(logits, targets)
+
+    def predictions_for_metrics(self, batch, predictions, stage):
+        del batch, stage
+        if predictions.ndim == 2 and predictions.size(-1) == 1:
+            predictions = predictions.squeeze(-1)
+        if predictions.ndim != 1:
+            raise ValueError("LinkPredictionTask expects one logit per candidate edge")
+        return predictions
+
+    def targets(self, batch, stage):
+        del stage
+        return batch.labels
 
 
 class TemporalEventPredictionTask(Task):
@@ -83,4 +106,8 @@ class TemporalEventPredictionTask(Task):
     def loss(self, batch, logits, stage):
         del stage
         return F.cross_entropy(logits, batch.labels)
+
+    def targets(self, batch, stage):
+        del stage
+        return batch.labels
 
