@@ -11,6 +11,15 @@ class Graph:
     nodes: dict[str, NodeStore]
     edges: dict[tuple[str, str, str], EdgeStore]
 
+    def __getattr__(self, name: str):
+        try:
+            nodes = object.__getattribute__(self, "nodes")
+        except AttributeError as exc:
+            raise AttributeError(name) from exc
+        if "node" in nodes and name in nodes["node"].data:
+            return nodes["node"].data[name]
+        raise AttributeError(name)
+
     @classmethod
     def homo(cls, *, edge_index, **node_data):
         nodes = {"node": NodeStore("node", dict(node_data))}
