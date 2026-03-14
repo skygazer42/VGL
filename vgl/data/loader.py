@@ -1,5 +1,5 @@
-from vgl.core.batch import GraphBatch, TemporalEventBatch
-from vgl.data.sample import TemporalEventRecord
+from vgl.core.batch import GraphBatch, LinkPredictionBatch, TemporalEventBatch
+from vgl.data.sample import LinkPredictionRecord, TemporalEventRecord
 
 
 class Loader:
@@ -13,6 +13,8 @@ class Loader:
     def _build_batch(self, items):
         if items and isinstance(items[0], TemporalEventRecord):
             return TemporalEventBatch.from_records(items)
+        if items and isinstance(items[0], LinkPredictionRecord):
+            return LinkPredictionBatch.from_records(items)
         if items and hasattr(items[0], "graph") and self.label_source is not None and self.label_key is not None:
             return GraphBatch.from_samples(
                 items,
