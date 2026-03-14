@@ -1,6 +1,6 @@
 import torch
 
-from gnn.nn.readout import global_max_pool, global_mean_pool, global_sum_pool
+from vgl.nn.readout import global_max_pool, global_mean_pool, global_sum_pool
 
 
 def test_global_mean_pool_reduces_node_embeddings_per_graph():
@@ -18,3 +18,4 @@ def test_global_sum_and_max_pool_reduce_per_graph():
 
     assert torch.equal(global_sum_pool(x, graph_index), torch.tensor([[4.0, 7.0], [10.0, 20.0]]))
     assert torch.equal(global_max_pool(x, graph_index), torch.tensor([[3.0, 5.0], [10.0, 20.0]]))
+

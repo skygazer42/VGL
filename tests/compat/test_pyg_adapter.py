@@ -3,7 +3,7 @@ import types
 
 import torch
 
-from gnn import Graph
+from vgl import Graph
 
 
 class FakeData:
@@ -33,3 +33,4 @@ def test_graph_round_trips_to_pyg_data(monkeypatch):
     assert torch.equal(restored.edge_index, data.edge_index)
     assert torch.equal(restored.x, data.x)
     assert torch.equal(restored.y, data.y)
+

@@ -1,10 +1,10 @@
 import pytest
 import torch
 
-from gnn import Graph
-from gnn.core.batch import TemporalEventBatch
-from gnn.data.sample import TemporalEventRecord
-from gnn.train.tasks import TemporalEventPredictionTask
+from vgl import Graph
+from vgl.core.batch import TemporalEventBatch
+from vgl.data.sample import TemporalEventRecord
+from vgl.train.tasks import TemporalEventPredictionTask
 
 
 def _batch():
@@ -38,3 +38,4 @@ def test_temporal_event_prediction_task_computes_loss():
 def test_temporal_event_prediction_task_rejects_unsupported_loss():
     with pytest.raises(ValueError, match="Unsupported loss"):
         TemporalEventPredictionTask(target="label", loss="bce")
+

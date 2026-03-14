@@ -1,14 +1,14 @@
 import torch
 from torch import nn
 
-from gnn import Graph
-from gnn.data.dataset import ListDataset
-from gnn.data.loader import Loader
-from gnn.data.sample import SampleRecord
-from gnn.data.sampler import FullGraphSampler
-from gnn.nn.readout import global_mean_pool
-from gnn.train.tasks import GraphClassificationTask
-from gnn.train.trainer import Trainer
+from vgl import Graph
+from vgl.data.dataset import ListDataset
+from vgl.data.loader import Loader
+from vgl.data.sample import SampleRecord
+from vgl.data.sampler import FullGraphSampler
+from vgl.nn.readout import global_mean_pool
+from vgl.train.tasks import GraphClassificationTask
+from vgl.train.trainer import Trainer
 
 
 class TinyGraphClassifier(nn.Module):
@@ -64,3 +64,4 @@ def test_many_graph_graph_classification_runs():
     result = trainer.fit(loader)
 
     assert result["epochs"] == 1
+

@@ -1,6 +1,6 @@
 import torch
 
-from gnn import Graph
+from vgl import Graph
 
 
 def test_homo_graph_exposes_pyg_style_fields():
@@ -14,3 +14,4 @@ def test_homo_graph_exposes_pyg_style_fields():
     assert torch.equal(graph.x, x)
     assert torch.equal(graph.y, y)
     assert torch.equal(graph.ndata["x"], x)
+

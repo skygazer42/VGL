@@ -1,6 +1,6 @@
 import torch
 
-from gnn.train.tasks import GraphClassificationTask
+from vgl.train.tasks import GraphClassificationTask
 
 
 class FakeBatch:
@@ -24,3 +24,4 @@ def test_graph_classification_task_uses_metadata_labels():
     loss = task.loss(FakeBatch(), logits, stage="train")
 
     assert loss.ndim == 0
+

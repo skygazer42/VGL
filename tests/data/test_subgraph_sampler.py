@@ -1,8 +1,8 @@
 import torch
 
-from gnn import Graph
-from gnn.data.sample import SampleRecord
-from gnn.data.sampler import NodeSeedSubgraphSampler
+from vgl import Graph
+from vgl.data.sample import SampleRecord
+from vgl.data.sampler import NodeSeedSubgraphSampler
 
 
 def test_node_seed_subgraph_sampler_returns_sample_record():
@@ -18,3 +18,4 @@ def test_node_seed_subgraph_sampler_returns_sample_record():
     assert isinstance(sample, SampleRecord)
     assert sample.sample_id == "s1"
     assert sample.metadata["label"] == 1
+

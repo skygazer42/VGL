@@ -1,6 +1,6 @@
 import pytest
 
-from gnn.core.schema import GraphSchema
+from vgl.core.schema import GraphSchema
 
 
 def test_schema_tracks_node_edge_and_time_metadata():
@@ -26,3 +26,4 @@ def test_schema_rejects_unknown_time_field():
             edge_features={("paper", "cites", "paper"): ("weight",)},
             time_attr="timestamp",
         )
+

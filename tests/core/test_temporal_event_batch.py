@@ -1,8 +1,8 @@
 import torch
 
-from gnn import Graph
-from gnn.core.batch import TemporalEventBatch
-from gnn.data.sample import TemporalEventRecord
+from vgl import Graph
+from vgl.core.batch import TemporalEventBatch
+from vgl.data.sample import TemporalEventRecord
 
 
 def test_temporal_event_batch_tracks_fields_and_history_views():
@@ -30,3 +30,4 @@ def test_temporal_event_batch_tracks_fields_and_history_views():
     assert torch.equal(batch.timestamp, torch.tensor([3, 5]))
     assert torch.equal(batch.labels, torch.tensor([1, 0]))
     assert torch.equal(history.edges[edge_type].timestamp, torch.tensor([1, 3]))
+

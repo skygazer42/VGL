@@ -1,9 +1,9 @@
 import torch
 
-from gnn import Graph
-from gnn.data.dataset import ListDataset
-from gnn.data.loader import Loader
-from gnn.data.sampler import FullGraphSampler
+from vgl import Graph
+from vgl.data.dataset import ListDataset
+from vgl.data.loader import Loader
+from vgl.data.sampler import FullGraphSampler
 
 
 def test_loader_returns_graph_batch_for_list_dataset():
@@ -26,3 +26,4 @@ def test_loader_returns_graph_batch_for_list_dataset():
     batch = next(iter(loader))
 
     assert batch.num_graphs == 2
+

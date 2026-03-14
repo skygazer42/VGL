@@ -1,8 +1,8 @@
 import torch
 
-from gnn import Graph
-from gnn.core.batch import GraphBatch
-from gnn.data.sample import SampleRecord
+from vgl import Graph
+from vgl.core.batch import GraphBatch
+from vgl.data.sample import SampleRecord
 
 
 def test_graph_batch_tracks_graph_ptr_labels_and_metadata():
@@ -29,3 +29,4 @@ def test_graph_batch_tracks_graph_ptr_labels_and_metadata():
     assert torch.equal(batch.graph_ptr, torch.tensor([0, 2, 5]))
     assert torch.equal(batch.labels, torch.tensor([1, 0]))
     assert batch.metadata[0]["label"] == 1
+

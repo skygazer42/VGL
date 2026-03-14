@@ -1,11 +1,11 @@
 import torch
 from torch import nn
 
-from gnn import Graph
-from gnn.core.batch import TemporalEventBatch
-from gnn.data.sample import TemporalEventRecord
-from gnn.train.tasks import TemporalEventPredictionTask
-from gnn.train.trainer import Trainer
+from vgl import Graph
+from vgl.core.batch import TemporalEventBatch
+from vgl.data.sample import TemporalEventRecord
+from vgl.train.tasks import TemporalEventPredictionTask
+from vgl.train.trainer import Trainer
 
 
 def _batch():
@@ -55,3 +55,4 @@ def test_trainer_runs_temporal_event_prediction_epoch():
     history = trainer.fit([batch])
 
     assert history["epochs"] == 1
+

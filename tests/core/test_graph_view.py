@@ -1,6 +1,6 @@
 import torch
 
-from gnn import Graph
+from vgl import Graph
 
 
 def test_snapshot_filters_temporal_edges_without_copying_features():
@@ -41,3 +41,4 @@ def test_window_filters_edges_inside_time_range():
         window.edges[("user", "interacts", "user")].timestamp,
         torch.tensor([3]),
     )
+

@@ -1,6 +1,6 @@
 import torch
 
-from gnn.nn.message_passing import MessagePassing
+from vgl.nn.message_passing import MessagePassing
 
 
 class IdentityMessagePassing(MessagePassing):
@@ -15,3 +15,4 @@ def test_message_passing_aggregates_neighbor_messages():
 
     assert out.shape == x.shape
     assert torch.equal(out, x.flip(0))
+

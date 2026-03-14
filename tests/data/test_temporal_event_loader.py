@@ -1,11 +1,11 @@
 import pytest
 import torch
 
-from gnn import Graph
-from gnn.data.dataset import ListDataset
-from gnn.data.loader import Loader
-from gnn.data.sample import TemporalEventRecord
-from gnn.data.sampler import FullGraphSampler
+from vgl import Graph
+from vgl.data.dataset import ListDataset
+from vgl.data.loader import Loader
+from vgl.data.sample import TemporalEventRecord
+from vgl.data.sampler import FullGraphSampler
 
 
 def _temporal_graph():
@@ -48,3 +48,4 @@ def test_loader_rejects_temporal_records_from_multiple_graphs():
 
     with pytest.raises(ValueError, match="single source graph"):
         next(iter(loader))
+

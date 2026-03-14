@@ -1,9 +1,9 @@
 import torch
 from torch import nn
 
-from gnn import Graph
-from gnn.train.tasks import NodeClassificationTask
-from gnn.train.trainer import Trainer
+from vgl import Graph
+from vgl.train.tasks import NodeClassificationTask
+from vgl.train.trainer import Trainer
 
 
 class LinearNodeModel(nn.Module):
@@ -40,3 +40,4 @@ def test_trainer_runs_single_epoch():
     history = trainer.fit(graph)
 
     assert history["epochs"] == 1
+

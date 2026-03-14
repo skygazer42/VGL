@@ -4,11 +4,11 @@ import sys
 import torch
 from torch import nn
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from gnn import Graph
-from gnn.train.tasks import NodeClassificationTask
-from gnn.train.trainer import Trainer
+from vgl import Graph
+from vgl.train.tasks import NodeClassificationTask
+from vgl.train.trainer import Trainer
 
 
 class TinyHeteroModel(nn.Module):
@@ -50,3 +50,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

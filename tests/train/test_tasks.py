@@ -1,7 +1,7 @@
 import torch
 
-from gnn import Graph
-from gnn.train.tasks import NodeClassificationTask
+from vgl import Graph
+from vgl.train.tasks import NodeClassificationTask
 
 
 def test_node_classification_task_computes_loss():
@@ -20,3 +20,4 @@ def test_node_classification_task_computes_loss():
     loss = task.loss(graph, logits, stage="train")
 
     assert loss.ndim == 0
+

@@ -4,16 +4,16 @@ import sys
 import torch
 from torch import nn
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from gnn import Graph
-from gnn.data.dataset import ListDataset
-from gnn.data.loader import Loader
-from gnn.data.sample import SampleRecord
-from gnn.data.sampler import FullGraphSampler
-from gnn.nn.readout import global_mean_pool
-from gnn.train.tasks import GraphClassificationTask
-from gnn.train.trainer import Trainer
+from vgl import Graph
+from vgl.data.dataset import ListDataset
+from vgl.data.loader import Loader
+from vgl.data.sample import SampleRecord
+from vgl.data.sampler import FullGraphSampler
+from vgl.nn.readout import global_mean_pool
+from vgl.train.tasks import GraphClassificationTask
+from vgl.train.trainer import Trainer
 
 
 class TinyGraphClassifier(nn.Module):
@@ -70,3 +70,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

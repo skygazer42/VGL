@@ -1,7 +1,7 @@
 import torch
 
-from gnn import Graph
-from gnn.core.batch import GraphBatch
+from vgl import Graph
+from vgl.core.batch import GraphBatch
 
 
 def test_graph_batch_tracks_membership():
@@ -20,3 +20,4 @@ def test_graph_batch_tracks_membership():
 
     assert batch.num_graphs == 2
     assert batch.graph_index.shape[0] == 4
+

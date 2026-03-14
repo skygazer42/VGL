@@ -4,15 +4,15 @@ import sys
 import torch
 from torch import nn
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from gnn import Graph
-from gnn.data.dataset import ListDataset
-from gnn.data.loader import Loader
-from gnn.data.sample import TemporalEventRecord
-from gnn.data.sampler import FullGraphSampler
-from gnn.train.tasks import TemporalEventPredictionTask
-from gnn.train.trainer import Trainer
+from vgl import Graph
+from vgl.data.dataset import ListDataset
+from vgl.data.loader import Loader
+from vgl.data.sample import TemporalEventRecord
+from vgl.data.sampler import FullGraphSampler
+from vgl.train.tasks import TemporalEventPredictionTask
+from vgl.train.trainer import Trainer
 
 
 class TinyTemporalEventModel(nn.Module):
@@ -71,3 +71,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

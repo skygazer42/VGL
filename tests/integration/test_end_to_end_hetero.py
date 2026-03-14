@@ -1,9 +1,9 @@
 import torch
 from torch import nn
 
-from gnn import Graph
-from gnn.train.tasks import NodeClassificationTask
-from gnn.train.trainer import Trainer
+from vgl import Graph
+from vgl.train.tasks import NodeClassificationTask
+from vgl.train.trainer import Trainer
 
 
 class TinyHeteroModel(nn.Module):
@@ -45,3 +45,4 @@ def test_end_to_end_hetero_training_runs():
     result = trainer.fit(graph)
 
     assert result["epochs"] == 1
+

@@ -1,10 +1,10 @@
 import torch
 
-from gnn import Graph
-from gnn.data.dataset import ListDataset
-from gnn.data.loader import Loader
-from gnn.data.sample import SampleRecord
-from gnn.data.sampler import FullGraphSampler
+from vgl import Graph
+from vgl.data.dataset import ListDataset
+from vgl.data.loader import Loader
+from vgl.data.sample import SampleRecord
+from vgl.data.sampler import FullGraphSampler
 
 
 def test_loader_collates_graph_samples_with_metadata_labels():
@@ -42,3 +42,4 @@ def test_loader_collates_graph_samples_with_metadata_labels():
 
     assert batch.num_graphs == 2
     assert torch.equal(batch.labels, torch.tensor([1, 0]))
+

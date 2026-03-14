@@ -1,6 +1,6 @@
 import torch
 
-from gnn import Graph
+from vgl import Graph
 
 
 def test_hetero_graph_exposes_typed_node_and_edge_stores():
@@ -38,3 +38,4 @@ def test_temporal_graph_keeps_time_metadata():
         graph.edges[("user", "interacts", "user")].timestamp,
         torch.tensor([1, 2]),
     )
+

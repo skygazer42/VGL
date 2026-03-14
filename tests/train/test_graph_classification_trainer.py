@@ -1,8 +1,8 @@
 import torch
 from torch import nn
 
-from gnn.train.tasks import GraphClassificationTask
-from gnn.train.trainer import Trainer
+from vgl.train.tasks import GraphClassificationTask
+from vgl.train.trainer import Trainer
 
 
 class FakeBatch:
@@ -36,3 +36,4 @@ def test_trainer_runs_graph_classification_epoch_over_batches():
 
     assert history["epochs"] == 1
     assert model.calls == 2
+

@@ -3,7 +3,7 @@ import types
 
 import torch
 
-from gnn import Graph
+from vgl import Graph
 
 
 class FakeDGLGraph:
@@ -35,3 +35,4 @@ def test_graph_round_trips_to_dgl_graph(monkeypatch):
 
     assert restored.num_nodes() == dgl_graph.num_nodes()
     assert torch.equal(restored.ndata["x"], dgl_graph.ndata["x"])
+
