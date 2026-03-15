@@ -7,15 +7,47 @@ from torch import nn
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from vgl import (
+    AGNNConv,
     APPNPConv,
+    ARMAConv,
+    AntiSymmetricConv,
+    BernConv,
     ChebConv,
+    ClusterGCNConv,
+    DAGNNConv,
+    DirGNNConv,
+    EdgeConv,
+    EGConv,
+    FAGCNConv,
+    FiLMConv,
+    FeaStConv,
+    GeneralConv,
     GATv2Conv,
+    GCN2Conv,
+    GatedGraphConv,
+    GENConv,
     GINConv,
+    GPRGNNConv,
     Graph,
+    GraphConv,
+    GroupRevRes,
+    H2GCNConv,
+    LEConv,
+    LGConv,
+    LightGCNConv,
+    MFConv,
+    MixHopConv,
     NodeClassificationTask,
+    PNAConv,
+    ResGatedGraphConv,
     SGConv,
+    SSGConv,
+    SimpleConv,
+    SuperGATConv,
     TAGConv,
+    TransformerConv,
     Trainer,
+    WLConvContinuous,
 )
 
 
@@ -37,6 +69,8 @@ class TinyConvModel(nn.Module):
         self.head = nn.Linear(hidden_channels, 2)
 
     def forward(self, graph):
+        if isinstance(self.conv, GCN2Conv):
+            return self.head(self.conv(graph, x0=graph.x))
         return self.head(self.conv(graph))
 
 
@@ -65,6 +99,61 @@ def main():
         run_one("tag", TAGConv(in_channels=4, out_channels=4, k=2), 4),
         run_one("sg", SGConv(in_channels=4, out_channels=4, k=2), 4),
         run_one("cheb", ChebConv(in_channels=4, out_channels=4, k=3), 4),
+        run_one("agnn", AGNNConv(channels=4), 4),
+        run_one("lightgcn", LightGCNConv(), 4),
+        run_one("lgconv", LGConv(), 4),
+        run_one("fagcn", FAGCNConv(channels=4, eps=0.1), 4),
+        run_one("arma", ARMAConv(channels=4, stacks=2, layers=2, alpha=0.1), 4),
+        run_one("gprgnn", GPRGNNConv(channels=4, steps=3, alpha=0.1), 4),
+        run_one("mixhop", MixHopConv(in_channels=4, out_channels=4, powers=(0, 1, 2)), 4),
+        run_one("bern", BernConv(channels=4, steps=3), 4),
+        run_one("ssg", SSGConv(channels=4, steps=3, alpha=0.1), 4),
+        run_one("dagnn", DAGNNConv(channels=4, steps=3), 4),
+        run_one("gcn2", GCN2Conv(channels=4, alpha=0.1, theta=1.0, layer=1), 4),
+        run_one("graphconv", GraphConv(in_channels=4, out_channels=4), 4),
+        run_one("h2gcn", H2GCNConv(in_channels=4, out_channels=4), 4),
+        run_one("egconv", EGConv(in_channels=4, out_channels=4, aggregators=("sum", "mean", "max")), 4),
+        run_one("leconv", LEConv(in_channels=4, out_channels=4), 4),
+        run_one("resgated", ResGatedGraphConv(in_channels=4, out_channels=4), 4),
+        run_one("gatedgraph", GatedGraphConv(channels=4, steps=2), 4),
+        run_one("clustergcn", ClusterGCNConv(in_channels=4, out_channels=4, diag_lambda=0.0), 4),
+        run_one("gen", GENConv(in_channels=4, out_channels=4, aggr="softmax", beta=1.0), 4),
+        run_one("film", FiLMConv(in_channels=4, out_channels=4), 4),
+        run_one("simple", SimpleConv(aggr="mean"), 4),
+        run_one("edgeconv", EdgeConv(in_channels=4, out_channels=4, aggr="max"), 4),
+        run_one("feast", FeaStConv(in_channels=4, out_channels=4, heads=2), 4),
+        run_one("mfconv", MFConv(in_channels=4, out_channels=4, max_degree=4), 4),
+        run_one(
+            "pna",
+            PNAConv(
+                in_channels=4,
+                out_channels=4,
+                aggregators=("sum", "mean", "max"),
+                scalers=("identity", "amplification", "attenuation"),
+            ),
+            4,
+        ),
+        run_one(
+            "generalconv",
+            GeneralConv(
+                in_channels=4,
+                out_channels=4,
+                aggr="add",
+                heads=2,
+                attention=True,
+            ),
+            4,
+        ),
+        run_one("antisymmetric", AntiSymmetricConv(channels=4, num_iters=2, epsilon=0.1, gamma=0.1), 4),
+        run_one(
+            "transformerconv",
+            TransformerConv(in_channels=4, out_channels=4, heads=2, concat=False, beta=True),
+            4,
+        ),
+        run_one("wlconv", WLConvContinuous(), 4),
+        run_one("supergat", SuperGATConv(in_channels=4, out_channels=4, heads=2, concat=False), 4),
+        run_one("dirgnn", DirGNNConv(GraphConv(in_channels=4, out_channels=4), alpha=0.5, root_weight=True), 4),
+        run_one("grouprevres", GroupRevRes(LGConv(), num_groups=2), 4),
     ]
     print(results)
     return results

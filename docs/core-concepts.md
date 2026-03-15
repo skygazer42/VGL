@@ -22,7 +22,9 @@ For graph classification it also carries:
 
 `MessagePassing` is the low-level neural primitive for graph convolutions. `GCNConv`, `SAGEConv`, and `GATConv` build on top of it.
 
-Built-in convolution layers live under `vgl.nn.conv`. The current homogeneous operator set includes `GCNConv`, `SAGEConv`, `GATConv`, `GINConv`, `GATv2Conv`, `APPNPConv`, `TAGConv`, `SGConv`, and `ChebConv`.
+Built-in convolution layers live under `vgl.nn.conv`. The current homogeneous operator set includes `GCNConv`, `SAGEConv`, `GATConv`, `GINConv`, `GATv2Conv`, `APPNPConv`, `TAGConv`, `SGConv`, `ChebConv`, `AGNNConv`, `LightGCNConv`, `LGConv`, `FAGCNConv`, `ARMAConv`, `GPRGNNConv`, `MixHopConv`, `BernConv`, `SSGConv`, `DAGNNConv`, `GCN2Conv`, `GraphConv`, `H2GCNConv`, `EGConv`, `LEConv`, `ResGatedGraphConv`, `GatedGraphConv`, `ClusterGCNConv`, `GENConv`, `FiLMConv`, `SimpleConv`, `EdgeConv`, `FeaStConv`, `MFConv`, `PNAConv`, `GeneralConv`, `AntiSymmetricConv`, `TransformerConv`, `WLConvContinuous`, `SuperGATConv`, and `DirGNNConv`.
+
+`GroupRevRes` lives under `vgl.nn` and wraps equal-width homogeneous operators into a grouped reversible residual block.
 
 ## SampleRecord
 

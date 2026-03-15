@@ -8,7 +8,8 @@ Unified graph learning framework with a stable core abstraction for homogeneous,
 - Homogeneous, heterogeneous, and temporal graph constructors
 - Schema validation, graph views, and graph batching
 - Minimal data pipeline with dataset, sampler, and loader contracts
-- `MessagePassing` plus `GCNConv`, `SAGEConv`, `GATConv`, `GINConv`, `GATv2Conv`, `APPNPConv`, `TAGConv`, `SGConv`, and `ChebConv`
+- `MessagePassing` plus `GCNConv`, `SAGEConv`, `GATConv`, `GINConv`, `GATv2Conv`, `APPNPConv`, `TAGConv`, `SGConv`, `ChebConv`, `AGNNConv`, `LightGCNConv`, `LGConv`, `FAGCNConv`, `ARMAConv`, `GPRGNNConv`, `MixHopConv`, `BernConv`, `SSGConv`, `DAGNNConv`, `GCN2Conv`, `GraphConv`, `H2GCNConv`, `EGConv`, `LEConv`, `ResGatedGraphConv`, `GatedGraphConv`, `ClusterGCNConv`, `GENConv`, `FiLMConv`, `SimpleConv`, `EdgeConv`, `FeaStConv`, `MFConv`, `PNAConv`, `GeneralConv`, `AntiSymmetricConv`, `TransformerConv`, `WLConvContinuous`, `SuperGATConv`, and `DirGNNConv`
+- `GroupRevRes` as a grouped reversible residual wrapper for equal-width homogeneous operators such as `LGConv`
 - Minimal training loop with `NodeClassificationTask`, `GraphClassificationTask`, `LinkPredictionTask`, `TemporalEventPredictionTask`, `Accuracy`, and `Trainer`
 - Graph-level readout with `global_mean_pool`, `global_sum_pool`, and `global_max_pool`
 - Graph classification from many-small-graph datasets and sampled subgraph records
