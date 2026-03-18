@@ -4,6 +4,9 @@ from torch import nn
 from vgl import Graph
 from vgl.core.batch import TemporalEventBatch
 from vgl.data.sample import TemporalEventRecord
+from vgl.data.dataset import ListDataset
+from vgl.data.loader import Loader
+from vgl.data.sampler import TemporalNeighborSampler
 from vgl.train.tasks import TemporalEventPredictionTask
 from vgl.train.trainer import Trainer
 
@@ -56,3 +59,36 @@ def test_trainer_runs_temporal_event_prediction_epoch():
 
     assert history["epochs"] == 1
 
+
+def test_trainer_runs_temporal_event_prediction_epoch_with_temporal_neighbor_sampling():
+    graph = Graph.temporal(
+        nodes={"node": {"x": torch.randn(4, 4)}},
+        edges={
+            ("node", "interacts", "node"): {
+                "edge_index": torch.tensor([[0, 1, 2], [1, 2, 0]]),
+                "timestamp": torch.tensor([1, 3, 5]),
+            }
+        },
+        time_attr="timestamp",
+    )
+    loader = Loader(
+        dataset=ListDataset(
+            [
+                TemporalEventRecord(graph=graph, src_index=1, dst_index=2, timestamp=3, label=1),
+                TemporalEventRecord(graph=graph, src_index=2, dst_index=0, timestamp=6, label=0),
+            ]
+        ),
+        sampler=TemporalNeighborSampler(num_neighbors=[-1]),
+        batch_size=2,
+    )
+    trainer = Trainer(
+        model=TinyTemporalEventModel(),
+        task=TemporalEventPredictionTask(target="label"),
+        optimizer=torch.optim.Adam,
+        lr=1e-2,
+        max_epochs=1,
+    )
+
+    history = trainer.fit(loader)
+
+    assert history["epochs"] == 1

@@ -19,6 +19,13 @@ class LinkPredictionRecord:
     label: int
     metadata: dict[str, Any] = field(default_factory=dict)
     sample_id: str | None = None
+    exclude_seed_edge: bool = False
+    hard_negative_dst: Any | None = None
+    candidate_dst: Any | None = None
+    edge_type: Any | None = None
+    reverse_edge_type: Any | None = None
+    query_id: Any | None = None
+    filter_ranking: bool = False
 
 
 @dataclass(slots=True)

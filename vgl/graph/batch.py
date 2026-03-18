@@ -4,11 +4,245 @@ from typing import TYPE_CHECKING
 import torch
 
 from vgl.graph.graph import Graph
+from vgl.graph.stores import EdgeStore
+from vgl.graph.view import GraphView
 
 if TYPE_CHECKING:
     from vgl.dataloading.records import LinkPredictionRecord
     from vgl.dataloading.records import SampleRecord
     from vgl.dataloading.records import TemporalEventRecord
+
+
+def _slice_edge_store(store: EdgeStore, mask: torch.Tensor) -> EdgeStore:
+    edge_count = int(store.edge_index.size(1))
+    edge_data = {}
+    for key, value in store.data.items():
+        if key == "edge_index":
+            edge_data[key] = value[:, mask]
+        elif isinstance(value, torch.Tensor) and value.ndim > 0 and value.size(0) == edge_count:
+            edge_data[key] = value[mask]
+        else:
+            edge_data[key] = value
+    return EdgeStore(store.type_name, edge_data)
+
+
+def _without_supervision_edges(graph, edge_pairs: set[tuple[int, int]]):
+    if not edge_pairs:
+        return graph
+    default_edge_type = graph._default_edge_type()
+    return _without_supervision_edges_for_type(graph, default_edge_type, edge_pairs)
+
+
+def _without_supervision_edges_for_type(graph, edge_type, edge_pairs: set[tuple[int, int]]):
+    if not edge_pairs:
+        return graph
+    edges = {}
+    for current_edge_type, store in graph.edges.items():
+        if current_edge_type != edge_type:
+            edges[current_edge_type] = store
+            continue
+        edge_index = store.edge_index
+        mask = torch.ones(edge_index.size(1), dtype=torch.bool, device=edge_index.device)
+        for src_index, dst_index in edge_pairs:
+            mask &= ~((edge_index[0] == src_index) & (edge_index[1] == dst_index))
+        edges[current_edge_type] = _slice_edge_store(store, mask)
+    base = getattr(graph, "base", graph)
+    return GraphView(base=base, nodes=graph.nodes, edges=edges, schema=graph.schema)
+
+
+def _unique_graphs(records):
+    graphs = []
+    seen = {}
+    for record in records:
+        graph_id = id(record.graph)
+        if graph_id in seen:
+            continue
+        seen[graph_id] = len(graphs)
+        graphs.append(record.graph)
+    return graphs
+
+
+def _node_aligned_value(value, count):
+    return isinstance(value, torch.Tensor) and value.ndim > 0 and value.size(0) == count
+
+
+def _node_count(store):
+    for value in store.data.values():
+        if isinstance(value, torch.Tensor) and value.ndim > 0:
+            return int(value.size(0))
+    return 0
+
+
+def _resolve_link_edge_type(record):
+    edge_type = getattr(record, "edge_type", None)
+    if edge_type is None:
+        edge_type = record.metadata.get("edge_type")
+    if edge_type is not None:
+        return tuple(edge_type)
+    graph = record.graph
+    if len(graph.edges) == 1:
+        return next(iter(graph.edges))
+    try:
+        return graph._default_edge_type()
+    except AttributeError as exc:
+        raise ValueError("Link prediction on heterogeneous graphs requires edge_type") from exc
+
+
+def _resolve_link_reverse_edge_type(record):
+    reverse_edge_type = getattr(record, "reverse_edge_type", None)
+    if reverse_edge_type is None:
+        reverse_edge_type = record.metadata.get("reverse_edge_type")
+    if reverse_edge_type is None:
+        return None
+    return tuple(reverse_edge_type)
+
+
+def _batch_homo_graphs(graphs, *, context):
+    if len(graphs) == 1:
+        return graphs[0], {id(graphs[0]): 0}
+    if any(set(graph.nodes) != {"node"} or len(graph.edges) != 1 for graph in graphs):
+        raise ValueError(f"{context} batching multiple graphs currently supports homogeneous graphs only")
+
+    first_graph = graphs[0]
+    node_keys = tuple(first_graph.nodes["node"].data.keys())
+    edge_store = first_graph.edges[first_graph._default_edge_type()]
+    edge_keys = tuple(edge_store.data.keys())
+    for graph in graphs[1:]:
+        if tuple(graph.nodes["node"].data.keys()) != node_keys:
+            raise ValueError(f"{context} requires matching node feature keys when batching multiple graphs")
+        if tuple(graph.edges[graph._default_edge_type()].data.keys()) != edge_keys:
+            raise ValueError(f"{context} requires matching edge feature keys when batching multiple graphs")
+
+    graph_offsets = {}
+    offset = 0
+    edge_indices = []
+    node_data = {key: [] for key in node_keys}
+    edge_data = {key: [] for key in edge_keys if key != "edge_index"}
+    for graph in graphs:
+        graph_offsets[id(graph)] = offset
+        num_nodes = int(graph.x.size(0))
+        edge_index = graph.edge_index
+        edge_count = int(edge_index.size(1))
+        edge_indices.append(edge_index + offset)
+        for key in node_keys:
+            value = graph.nodes["node"].data[key]
+            if not _node_aligned_value(value, num_nodes):
+                raise ValueError(
+                    f"{context} cannot batch multi-graph node attribute '{key}' because it is not node-aligned"
+                )
+            node_data[key].append(value)
+        for key, value in graph.edges[graph._default_edge_type()].data.items():
+            if key == "edge_index":
+                continue
+            if not _node_aligned_value(value, edge_count):
+                raise ValueError(
+                    f"{context} cannot batch multi-graph edge attribute '{key}' because it is not edge-aligned"
+                )
+            edge_data[key].append(value)
+        offset += num_nodes
+
+    batched_node_data = {key: torch.cat(values, dim=0) for key, values in node_data.items()}
+    batched_edge_data = {key: torch.cat(values, dim=0) for key, values in edge_data.items()}
+    batched_edge_index = torch.cat(edge_indices, dim=1)
+    return Graph.homo(edge_index=batched_edge_index, edge_data=batched_edge_data, **batched_node_data), graph_offsets
+
+
+def _batch_hetero_graphs(graphs, *, context):
+    if len(graphs) == 1:
+        graph = graphs[0]
+        return graph, {id(graph): {node_type: 0 for node_type in graph.schema.node_types}}
+
+    first_graph = graphs[0]
+    node_types = first_graph.schema.node_types
+    edge_types = first_graph.schema.edge_types
+    time_attr = first_graph.schema.time_attr
+    node_keys = {
+        node_type: tuple(first_graph.nodes[node_type].data.keys())
+        for node_type in node_types
+    }
+    edge_keys = {
+        edge_type: tuple(first_graph.edges[edge_type].data.keys())
+        for edge_type in edge_types
+    }
+
+    for graph in graphs[1:]:
+        if graph.schema.node_types != node_types or graph.schema.edge_types != edge_types:
+            raise ValueError(f"{context} requires matching node and edge types when batching multiple graphs")
+        if graph.schema.time_attr != time_attr:
+            raise ValueError(f"{context} requires matching time_attr when batching multiple graphs")
+        for node_type in node_types:
+            if tuple(graph.nodes[node_type].data.keys()) != node_keys[node_type]:
+                raise ValueError(f"{context} requires matching node feature keys when batching multiple graphs")
+        for edge_type in edge_types:
+            if tuple(graph.edges[edge_type].data.keys()) != edge_keys[edge_type]:
+                raise ValueError(f"{context} requires matching edge feature keys when batching multiple graphs")
+
+    graph_offsets = {}
+    running_offsets = {node_type: 0 for node_type in node_types}
+    batched_nodes = {
+        node_type: {key: [] for key in node_keys[node_type]}
+        for node_type in node_types
+    }
+    batched_edges = {
+        edge_type: {key: [] for key in edge_keys[edge_type] if key != "edge_index"}
+        for edge_type in edge_types
+    }
+    edge_indices = {edge_type: [] for edge_type in edge_types}
+
+    for graph in graphs:
+        graph_offsets[id(graph)] = dict(running_offsets)
+        node_counts = {}
+        for node_type in node_types:
+            store = graph.nodes[node_type]
+            node_count = _node_count(store)
+            node_counts[node_type] = node_count
+            for key in node_keys[node_type]:
+                value = store.data[key]
+                if not _node_aligned_value(value, node_count):
+                    raise ValueError(
+                        f"{context} cannot batch multi-graph node attribute '{node_type}.{key}' because it is not node-aligned"
+                    )
+                batched_nodes[node_type][key].append(value)
+
+        for edge_type in edge_types:
+            src_type, _, dst_type = edge_type
+            store = graph.edges[edge_type]
+            edge_count = int(store.edge_index.size(1))
+            offset = torch.tensor(
+                [[running_offsets[src_type]], [running_offsets[dst_type]]],
+                dtype=store.edge_index.dtype,
+                device=store.edge_index.device,
+            )
+            edge_indices[edge_type].append(store.edge_index + offset)
+            for key in edge_keys[edge_type]:
+                if key == "edge_index":
+                    continue
+                value = store.data[key]
+                if not _node_aligned_value(value, edge_count):
+                    raise ValueError(
+                        f"{context} cannot batch multi-graph edge attribute '{edge_type}.{key}' because it is not edge-aligned"
+                    )
+                batched_edges[edge_type][key].append(value)
+
+        for node_type, node_count in node_counts.items():
+            running_offsets[node_type] += node_count
+
+    nodes = {
+        node_type: {
+            key: torch.cat(values, dim=0)
+            for key, values in data.items()
+        }
+        for node_type, data in batched_nodes.items()
+    }
+    edges = {}
+    for edge_type in edge_types:
+        edge_data = {
+            key: torch.cat(values, dim=0)
+            for key, values in batched_edges[edge_type].items()
+        }
+        edge_data["edge_index"] = torch.cat(edge_indices[edge_type], dim=1)
+        edges[edge_type] = edge_data
+    return Graph.hetero(nodes=nodes, edges=edges, time_attr=time_attr), graph_offsets
 
 
 @dataclass(slots=True)
@@ -57,11 +291,68 @@ class GraphBatch:
 
 
 @dataclass(slots=True)
+class NodeBatch:
+    graph: Graph
+    seed_index: torch.Tensor
+    metadata: list[dict] | None = None
+
+    @classmethod
+    def from_samples(
+        cls,
+        samples: list["SampleRecord"],
+    ) -> "NodeBatch":
+        if not samples:
+            raise ValueError("NodeBatch requires at least one sample")
+        if any(sample.subgraph_seed is None for sample in samples):
+            raise ValueError("NodeBatch requires subgraph_seed for every sample")
+
+        graphs = _unique_graphs(samples)
+        first_graph = graphs[0]
+        if set(first_graph.nodes) == {"node"} and len(first_graph.edges) == 1:
+            graph, graph_offsets = _batch_homo_graphs(graphs, context="NodeBatch")
+            seed_values = []
+            for sample in samples:
+                sample_graph = sample.graph
+                num_nodes = int(sample_graph.x.size(0))
+                seed_index = int(sample.subgraph_seed)
+                if seed_index < 0 or seed_index >= num_nodes:
+                    raise ValueError("NodeBatch subgraph_seed must fall within the sampled graph node range")
+                seed_values.append(seed_index + graph_offsets[id(sample_graph)])
+        else:
+            graph, graph_offsets = _batch_hetero_graphs(graphs, context="NodeBatch")
+            seed_values = []
+            for sample in samples:
+                sample_graph = sample.graph
+                node_type = sample.metadata.get("node_type")
+                if node_type is None:
+                    raise ValueError("NodeBatch requires metadata['node_type'] for heterogeneous sampled graphs")
+                if node_type not in sample_graph.nodes:
+                    raise ValueError("NodeBatch metadata['node_type'] must exist in the sampled graph")
+                num_nodes = _node_count(sample_graph.nodes[node_type])
+                seed_index = int(sample.subgraph_seed)
+                if seed_index < 0 or seed_index >= num_nodes:
+                    raise ValueError("NodeBatch subgraph_seed must fall within the sampled graph node range")
+                seed_values.append(seed_index + graph_offsets[id(sample_graph)][node_type])
+        return cls(
+            graph=graph,
+            seed_index=torch.tensor(seed_values, dtype=torch.long),
+            metadata=[sample.metadata for sample in samples],
+        )
+
+
+@dataclass(slots=True)
 class LinkPredictionBatch:
     graph: Graph
     src_index: torch.Tensor
     dst_index: torch.Tensor
     labels: torch.Tensor
+    edge_types: tuple[tuple[str, str, str], ...] | None = None
+    edge_type_index: torch.Tensor | None = None
+    edge_type: tuple[str, str, str] | None = None
+    src_node_type: str | None = None
+    dst_node_type: str | None = None
+    query_index: torch.Tensor | None = None
+    filter_mask: torch.Tensor | None = None
     metadata: list[dict] | None = None
 
     @classmethod
@@ -71,32 +362,121 @@ class LinkPredictionBatch:
     ) -> "LinkPredictionBatch":
         if not records:
             raise ValueError("LinkPredictionBatch requires at least one record")
-        graph = records[0].graph
-        if any(record.graph is not graph for record in records):
-            raise ValueError(
-                "LinkPredictionBatch currently supports samples from a single source graph only"
-            )
+        graphs = _unique_graphs(records)
+        first_graph = graphs[0]
+        record_edge_types = [_resolve_link_edge_type(record) for record in records]
+        edge_types = tuple(dict.fromkeys(record_edge_types))
+        edge_type_to_index = {edge_type: index for index, edge_type in enumerate(edge_types)}
+        edge_type_index = torch.tensor([edge_type_to_index[edge_type] for edge_type in record_edge_types], dtype=torch.long)
 
-        src_index = torch.tensor([record.src_index for record in records], dtype=torch.long)
-        dst_index = torch.tensor([record.dst_index for record in records], dtype=torch.long)
+        is_homo = set(first_graph.nodes) == {"node"} and len(first_graph.edges) == 1
+        if is_homo:
+            graph, graph_offsets = _batch_homo_graphs(graphs, context="LinkPredictionBatch")
+        else:
+            graph, graph_offsets = _batch_hetero_graphs(graphs, context="LinkPredictionBatch")
+
+        if len(edge_types) == 1:
+            edge_type = edge_types[0]
+            src_node_type = edge_type[0]
+            dst_node_type = edge_type[2]
+        else:
+            edge_type = None
+            src_node_type = None
+            dst_node_type = None
+
+        src_values = []
+        dst_values = []
+        for record, current_edge_type in zip(records, record_edge_types):
+            record_graph = record.graph
+            src_index = int(record.src_index)
+            dst_index = int(record.dst_index)
+            if current_edge_type not in record_graph.edges:
+                raise ValueError("LinkPredictionBatch record edge_type must exist in the source graph")
+            current_src_type, _, current_dst_type = current_edge_type
+            if is_homo:
+                num_nodes = int(record_graph.x.size(0))
+                if src_index < 0 or src_index >= num_nodes or dst_index < 0 or dst_index >= num_nodes:
+                    raise ValueError("LinkPredictionBatch indices must fall within the source graph node range")
+                offset = graph_offsets[id(record_graph)]
+                src_values.append(src_index + offset)
+                dst_values.append(dst_index + offset)
+            else:
+                src_count = _node_count(record_graph.nodes[current_src_type])
+                dst_count = _node_count(record_graph.nodes[current_dst_type])
+                if src_index < 0 or src_index >= src_count or dst_index < 0 or dst_index >= dst_count:
+                    raise ValueError("LinkPredictionBatch indices must fall within the source graph node range")
+                src_values.append(src_index + graph_offsets[id(record_graph)][current_src_type])
+                dst_values.append(dst_index + graph_offsets[id(record_graph)][current_dst_type])
+
+        src_index = torch.tensor(src_values, dtype=torch.long)
+        dst_index = torch.tensor(dst_values, dtype=torch.long)
         labels = torch.tensor([float(record.label) for record in records], dtype=torch.float32)
-        num_nodes = graph.x.size(0)
-
-        if (
-            (src_index < 0).any()
-            or (src_index >= num_nodes).any()
-            or (dst_index < 0).any()
-            or (dst_index >= num_nodes).any()
-        ):
-            raise ValueError("LinkPredictionBatch indices must fall within the source graph node range")
+        query_ids = [record.query_id for record in records]
+        filter_flags = [
+            bool(getattr(record, "filter_ranking", False) or record.metadata.get("filter_ranking", False))
+            for record in records
+        ]
         if not torch.all((labels == 0) | (labels == 1)):
             raise ValueError("LinkPredictionBatch labels must be binary 0/1")
+        supervision_edges_by_type: dict[tuple[str, str, str], set[tuple[int, int]]] = {}
+        reverse_supervision_edges: dict[tuple[str, str, str], set[tuple[int, int]]] = {}
+        for record, current_edge_type in zip(records, record_edge_types):
+            if int(record.label) != 1:
+                continue
+            if not (getattr(record, "exclude_seed_edge", False) or bool(record.metadata.get("exclude_seed_edges", False))):
+                continue
+            record_graph = record.graph
+            current_src_type, _, current_dst_type = current_edge_type
+            if is_homo:
+                offset = graph_offsets[id(record_graph)]
+                src_value = int(record.src_index) + offset
+                dst_value = int(record.dst_index) + offset
+            else:
+                src_value = int(record.src_index) + graph_offsets[id(record_graph)][current_src_type]
+                dst_value = int(record.dst_index) + graph_offsets[id(record_graph)][current_dst_type]
+            supervision_edges_by_type.setdefault(current_edge_type, set()).add((src_value, dst_value))
+            reverse_edge_type = _resolve_link_reverse_edge_type(record)
+            if reverse_edge_type is not None:
+                if is_homo:
+                    reverse_src = dst_value
+                    reverse_dst = src_value
+                else:
+                    reverse_src_type, _, reverse_dst_type = reverse_edge_type
+                    reverse_src = int(record.dst_index) + graph_offsets[id(record_graph)][reverse_src_type]
+                    reverse_dst = int(record.src_index) + graph_offsets[id(record_graph)][reverse_dst_type]
+                reverse_supervision_edges.setdefault(reverse_edge_type, set()).add((reverse_src, reverse_dst))
+
+        batch_graph = graph
+        for current_edge_type, supervision_edges in supervision_edges_by_type.items():
+            batch_graph = _without_supervision_edges_for_type(batch_graph, current_edge_type, supervision_edges)
+        for reverse_edge_type, reverse_edges in reverse_supervision_edges.items():
+            batch_graph = _without_supervision_edges_for_type(batch_graph, reverse_edge_type, reverse_edges)
+        if all(query_id is None for query_id in query_ids):
+            query_index = None
+        elif any(query_id is None for query_id in query_ids):
+            raise ValueError("LinkPredictionBatch requires query_id for either all or none of the records")
+        else:
+            query_id_map = {}
+            query_values = []
+            for query_id in query_ids:
+                if query_id not in query_id_map:
+                    query_id_map[query_id] = len(query_id_map)
+                query_values.append(query_id_map[query_id])
+            query_index = torch.tensor(query_values, dtype=torch.long)
+        filter_mask = torch.tensor(filter_flags, dtype=torch.bool)
 
         return cls(
-            graph=graph,
+            graph=batch_graph,
             src_index=src_index,
             dst_index=dst_index,
             labels=labels,
+            edge_types=edge_types,
+            edge_type_index=edge_type_index,
+            edge_type=edge_type,
+            src_node_type=src_node_type,
+            dst_node_type=dst_node_type,
+            query_index=query_index,
+            filter_mask=filter_mask,
             metadata=[record.metadata for record in records],
         )
 
@@ -118,13 +498,26 @@ class TemporalEventBatch:
     ) -> "TemporalEventBatch":
         if not records:
             raise ValueError("TemporalEventBatch requires at least one record")
-        graph = records[0].graph
-        if graph.schema.time_attr is None:
+        if any(record.graph.schema.time_attr is None for record in records):
             raise ValueError("TemporalEventBatch requires a temporal graph with schema.time_attr")
-        if any(record.graph is not graph for record in records):
-            raise ValueError(
-                "TemporalEventBatch currently supports samples from a single source graph only"
-            )
+        graphs = _unique_graphs(records)
+        graph, graph_offsets = _batch_hetero_graphs(graphs, context="TemporalEventBatch")
+
+        src_values = []
+        dst_values = []
+        for record in records:
+            record_graph = record.graph
+            if "node" not in record_graph.nodes:
+                raise ValueError("TemporalEventBatch requires a 'node' node type for event endpoints")
+            num_nodes = _node_count(record_graph.nodes["node"])
+            src_index = int(record.src_index)
+            dst_index = int(record.dst_index)
+            if src_index < 0 or src_index >= num_nodes or dst_index < 0 or dst_index >= num_nodes:
+                raise ValueError("TemporalEventBatch indices must fall within the source graph node range")
+            offset = graph_offsets[id(record_graph)]["node"]
+            src_values.append(src_index + offset)
+            dst_values.append(dst_index + offset)
+
         event_features = [record.event_features for record in records]
         if all(feature is None for feature in event_features):
             stacked_event_features = None
@@ -134,8 +527,8 @@ class TemporalEventBatch:
             stacked_event_features = torch.stack([torch.as_tensor(feature) for feature in event_features], dim=0)
         return cls(
             graph=graph,
-            src_index=torch.tensor([record.src_index for record in records]),
-            dst_index=torch.tensor([record.dst_index for record in records]),
+            src_index=torch.tensor(src_values, dtype=torch.long),
+            dst_index=torch.tensor(dst_values, dtype=torch.long),
             timestamp=torch.tensor([record.timestamp for record in records]),
             labels=torch.tensor([record.label for record in records]),
             event_features=stacked_event_features,

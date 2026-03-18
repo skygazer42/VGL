@@ -1,5 +1,6 @@
 from vgl.graph.batch import GraphBatch as GraphBatch
 from vgl.graph.batch import LinkPredictionBatch as LinkPredictionBatch
+from vgl.graph.batch import NodeBatch as NodeBatch
 from vgl.graph.batch import TemporalEventBatch as TemporalEventBatch
 from vgl.graph.errors import GNNError as GNNError
 from vgl.graph.errors import SchemaError as SchemaError
@@ -15,6 +16,7 @@ __all__ = [
     "GraphSchema",
     "GraphView",
     "LinkPredictionBatch",
+    "NodeBatch",
     "TemporalEventBatch",
     "NodeStore",
     "EdgeStore",

@@ -6,7 +6,13 @@ from torch import nn
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from vgl.dataloading import DataLoader, FullGraphSampler, ListDataset, TemporalEventRecord
+from vgl.dataloading import (
+    DataLoader,
+    FullGraphSampler,
+    ListDataset,
+    TemporalEventRecord,
+    TemporalNeighborSampler,
+)
 from vgl.engine import Trainer
 from vgl.graph import Graph
 from vgl.nn import TGNMemory
@@ -32,10 +38,16 @@ class TinyTemporalMemoryModel(nn.Module):
         else:
             event_features = event_features.to(dtype=self.linear.weight.dtype, device=self.linear.weight.device)
 
+        node_ids = batch.graph.nodes["node"].data.get("n_id")
+        if node_ids is None:
+            node_ids = torch.arange(batch.graph.x.size(0), dtype=torch.long, device=batch.src_index.device)
+        else:
+            node_ids = node_ids.to(dtype=torch.long, device=batch.src_index.device)
+
         logits = self.linear.weight.new_zeros(batch.labels.size(0), 2)
         for index in torch.argsort(batch.timestamp).tolist():
-            src_index = batch.src_index[index : index + 1]
-            dst_index = batch.dst_index[index : index + 1]
+            src_index = node_ids[batch.src_index[index : index + 1]]
+            dst_index = node_ids[batch.dst_index[index : index + 1]]
             raw_message = event_features[index : index + 1]
 
             src_memory = self.memory(src_index).squeeze(0)
@@ -87,6 +99,33 @@ def build_demo_loader():
     return DataLoader(
         dataset=ListDataset(samples),
         sampler=FullGraphSampler(),
+        batch_size=2,
+    )
+
+
+def build_sampled_demo_loader():
+    graph = build_demo_graph()
+    samples = [
+        TemporalEventRecord(
+            graph=graph,
+            src_index=0,
+            dst_index=1,
+            timestamp=3,
+            label=1,
+            event_features=torch.tensor([1.0, 0.0]),
+        ),
+        TemporalEventRecord(
+            graph=graph,
+            src_index=2,
+            dst_index=0,
+            timestamp=5,
+            label=0,
+            event_features=torch.tensor([0.0, 1.0]),
+        ),
+    ]
+    return DataLoader(
+        dataset=ListDataset(samples),
+        sampler=TemporalNeighborSampler(num_neighbors=[-1]),
         batch_size=2,
     )
 

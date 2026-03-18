@@ -1,11 +1,17 @@
 import torch
 from torch import nn
 
+from examples.hetero.link_prediction import TinyHeteroLinkPredictor as DemoHeteroLinkPredictor
+from examples.hetero.link_prediction import TinyMixedHeteroLinkPredictor as DemoMixedHeteroLinkPredictor
+from examples.hetero.link_prediction import build_demo_loaders as build_hetero_link_demo_loaders
+from examples.hetero.link_prediction import build_mixed_demo_loaders as build_mixed_hetero_link_demo_loaders
+from examples.hetero.node_classification import build_demo_loaders
 from vgl.engine import Trainer
 from vgl.graph import Graph
 from vgl.nn import HANConv
 from vgl.nn import HEATConv
 from vgl.nn import RGATConv
+from vgl.tasks import LinkPredictionTask
 from vgl.tasks import NodeClassificationTask
 
 
@@ -42,6 +48,8 @@ class TinyHeteroModel(nn.Module):
         self.linear = nn.Linear(4, 2)
 
     def forward(self, graph):
+        if hasattr(graph, "graph"):
+            graph = graph.graph
         return self.linear(graph.nodes["paper"].x)
 
 
@@ -57,6 +65,23 @@ def test_end_to_end_hetero_training_runs():
     result = trainer.fit(graph)
 
     assert result["epochs"] == 1
+
+
+def test_end_to_end_hetero_neighbor_sampled_training_runs():
+    train_loader, val_loader, test_loader = build_demo_loaders()
+    task = NodeClassificationTask(
+        target="y",
+        split=("train_mask", "val_mask", "test_mask"),
+        node_type="paper",
+        metrics=["accuracy"],
+    )
+    trainer = Trainer(model=TinyHeteroModel(), task=task, optimizer=torch.optim.Adam, lr=1e-2, max_epochs=1)
+
+    history = trainer.fit(train_loader, val_data=val_loader)
+    result = trainer.test(test_loader)
+
+    assert history["epochs"] == 1
+    assert "accuracy" in result
 
 
 def test_end_to_end_hetero_training_runs_with_han_conv():
@@ -157,3 +182,37 @@ def test_end_to_end_hetero_training_runs_with_rgat_conv():
     result = trainer.fit(graph)
 
     assert result["epochs"] == 1
+
+
+def test_end_to_end_hetero_link_prediction_runs():
+    train_loader, val_loader, test_loader = build_hetero_link_demo_loaders()
+    trainer = Trainer(
+        model=DemoHeteroLinkPredictor(),
+        task=LinkPredictionTask(target="label", metrics=["mrr", "filtered_mrr", "filtered_hits@1"]),
+        optimizer=torch.optim.Adam,
+        lr=1e-2,
+        max_epochs=1,
+    )
+
+    history = trainer.fit(train_loader, val_data=val_loader)
+    result = trainer.test(test_loader)
+
+    assert history["epochs"] == 1
+    assert "mrr" in result
+
+
+def test_end_to_end_mixed_hetero_link_prediction_runs():
+    train_loader, val_loader, test_loader = build_mixed_hetero_link_demo_loaders()
+    trainer = Trainer(
+        model=DemoMixedHeteroLinkPredictor(),
+        task=LinkPredictionTask(target="label", metrics=["mrr", "filtered_mrr", "filtered_hits@1"]),
+        optimizer=torch.optim.Adam,
+        lr=1e-2,
+        max_epochs=1,
+    )
+
+    history = trainer.fit(train_loader, val_data=val_loader)
+    result = trainer.test(test_loader)
+
+    assert history["epochs"] == 1
+    assert "mrr" in result

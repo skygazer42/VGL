@@ -12,6 +12,7 @@ from vgl.engine import Evaluator as Evaluator
 from vgl.engine import FocalGammaScheduler as FocalGammaScheduler
 from vgl.engine import FloodingLevelScheduler as FloodingLevelScheduler
 from vgl.engine import GeneralizedCrossEntropyScheduler as GeneralizedCrossEntropyScheduler
+from vgl.engine import GradientAccumulationScheduler as GradientAccumulationScheduler
 from vgl.engine import GradientNoiseInjection as GradientNoiseInjection
 from vgl.engine import GradientValueClipping as GradientValueClipping
 from vgl.engine import GradientCentralization as GradientCentralization
@@ -21,6 +22,7 @@ from vgl.engine import HistoryLogger as HistoryLogger
 from vgl.engine import LabelSmoothingScheduler as LabelSmoothingScheduler
 from vgl.engine import LdamMarginScheduler as LdamMarginScheduler
 from vgl.engine import LogitAdjustTauScheduler as LogitAdjustTauScheduler
+from vgl.engine import ModelCheckpoint as ModelCheckpoint
 from vgl.engine import Poly1EpsilonScheduler as Poly1EpsilonScheduler
 from vgl.engine import PosWeightScheduler as PosWeightScheduler
 from vgl.engine import SymmetricCrossEntropyBetaScheduler as SymmetricCrossEntropyBetaScheduler
@@ -37,7 +39,11 @@ from vgl.engine import load_checkpoint as load_checkpoint
 from vgl.engine import restore_checkpoint as restore_checkpoint
 from vgl.engine import save_checkpoint as save_checkpoint
 from vgl.metrics import Accuracy as Accuracy
+from vgl.metrics import FilteredHitsAtK as FilteredHitsAtK
+from vgl.metrics import FilteredMRR as FilteredMRR
+from vgl.metrics import HitsAtK as HitsAtK
 from vgl.metrics import Metric as Metric
+from vgl.metrics import MRR as MRR
 from vgl.metrics import build_metric as build_metric
 from vgl.tasks import BootstrapTask as BootstrapTask
 from vgl.tasks import ConfidencePenaltyTask as ConfidencePenaltyTask
@@ -66,25 +72,31 @@ __all__ = [
     "EarlyStopping",
     "ExponentialMovingAverage",
     "Evaluator",
+    "FilteredHitsAtK",
+    "FilteredMRR",
     "FocalGammaScheduler",
     "FloodingLevelScheduler",
     "GeneralizedCrossEntropyScheduler",
     "SymmetricCrossEntropyBetaScheduler",
+    "GradientAccumulationScheduler",
     "GradientNoiseInjection",
     "GradientValueClipping",
     "GradientCentralization",
     "GSAM",
     "GradualUnfreezing",
     "HistoryLogger",
+    "HitsAtK",
     "LabelSmoothingScheduler",
     "LdamMarginScheduler",
     "LogitAdjustTauScheduler",
+    "ModelCheckpoint",
     "Poly1EpsilonScheduler",
     "PosWeightScheduler",
     "WeightDecayScheduler",
     "LayerwiseLrDecay",
     "Lookahead",
     "Metric",
+    "MRR",
     "SAM",
     "StochasticWeightAveraging",
     "StopTraining",

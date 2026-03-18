@@ -65,3 +65,39 @@ def test_temporal_event_batch_stacks_event_features():
     batch = TemporalEventBatch.from_records(records)
 
     assert torch.equal(batch.event_features, torch.tensor([[1.0, 0.0], [0.0, 1.0]]))
+
+
+def test_temporal_event_batch_batches_multiple_temporal_graphs():
+    g1 = Graph.temporal(
+        nodes={"node": {"x": torch.randn(2, 4)}},
+        edges={
+            ("node", "interacts", "node"): {
+                "edge_index": torch.tensor([[0], [1]]),
+                "timestamp": torch.tensor([1]),
+            }
+        },
+        time_attr="timestamp",
+    )
+    g2 = Graph.temporal(
+        nodes={"node": {"x": torch.randn(3, 4)}},
+        edges={
+            ("node", "interacts", "node"): {
+                "edge_index": torch.tensor([[0, 1], [1, 2]]),
+                "timestamp": torch.tensor([2, 4]),
+            }
+        },
+        time_attr="timestamp",
+    )
+
+    batch = TemporalEventBatch.from_records(
+        [
+            TemporalEventRecord(graph=g1, src_index=0, dst_index=1, timestamp=1, label=1),
+            TemporalEventRecord(graph=g2, src_index=1, dst_index=2, timestamp=4, label=0),
+        ]
+    )
+    edge_type = ("node", "interacts", "node")
+
+    assert torch.equal(batch.src_index, torch.tensor([0, 3]))
+    assert torch.equal(batch.dst_index, torch.tensor([1, 4]))
+    assert torch.equal(batch.graph.edges[edge_type].edge_index, torch.tensor([[0, 2, 3], [1, 3, 4]]))
+    assert torch.equal(batch.graph.edges[edge_type].timestamp, torch.tensor([1, 2, 4]))

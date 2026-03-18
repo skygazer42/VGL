@@ -254,7 +254,7 @@ class Trainer:
         metric_predictions, targets = self._metric_inputs(batch, predictions, stage=stage)
         count = int(targets.size(0))
         for metric in metrics:
-            metric.update(metric_predictions.detach(), targets.detach())
+            metric.update(metric_predictions.detach(), targets.detach(), batch=batch)
         return loss.detach().item() * count, count
 
     def _backward_loss(self, loss):
@@ -580,48 +580,52 @@ class Trainer:
             self.best_metric = trainer_state.get("best_metric")
             self.active_monitor = trainer_state.get("active_monitor", monitor) or monitor
             self.global_step = int(trainer_state.get("global_step", 0))
-        self._run_callbacks("on_fit_start", history=history)
-        if resume_state is not None:
-            self._restore_callback_states(resume_state.get("callback_states"))
-            self._resume_state = None
+        try:
+            self._run_callbacks("on_fit_start", history=history)
+            if resume_state is not None:
+                self._restore_callback_states(resume_state.get("callback_states"))
+                self._resume_state = None
 
-        for epoch in range(start_epoch, self.max_epochs + 1):
-            train_summary = self._run_epoch(train_data, stage="train", training=True)
-            val_summary = None
-            if val_data is not None:
-                val_summary = self._run_epoch(val_data, stage="val", training=False)
+            for epoch in range(start_epoch, self.max_epochs + 1):
+                train_summary = self._run_epoch(train_data, stage="train", training=True)
+                val_summary = None
+                if val_data is not None:
+                    val_summary = self._run_epoch(val_data, stage="val", training=False)
 
-            current = self._monitor_value(monitor, train_summary, val_summary)
-            improved = is_improvement(
-                current,
-                self.best_metric,
-                mode,
-            )
-            if improved:
-                self.best_metric = float(current)
-                self.best_epoch = epoch
-                self.best_state_dict = deepcopy(self.model.state_dict())
-                self._save_best()
+                current = self._monitor_value(monitor, train_summary, val_summary)
+                improved = is_improvement(
+                    current,
+                    self.best_metric,
+                    mode,
+                )
+                if improved:
+                    self.best_metric = float(current)
+                    self.best_epoch = epoch
+                    self.best_state_dict = deepcopy(self.model.state_dict())
+                    self._save_best()
 
-            history.record_epoch(
-                epoch=epoch,
-                train_summary=train_summary,
-                val_summary=val_summary,
-                best_epoch=self.best_epoch,
-                best_metric=self.best_metric,
-            )
-            self._step_lr_scheduler(monitor, train_summary, val_summary)
-            try:
-                self._run_callbacks(
-                    "on_epoch_end",
+                history.record_epoch(
                     epoch=epoch,
                     train_summary=train_summary,
                     val_summary=val_summary,
-                    history=history,
+                    best_epoch=self.best_epoch,
+                    best_metric=self.best_metric,
                 )
-            except StopTraining as exc:
-                history.mark_stopped(str(exc) or None)
-                break
+                self._step_lr_scheduler(monitor, train_summary, val_summary)
+                try:
+                    self._run_callbacks(
+                        "on_epoch_end",
+                        epoch=epoch,
+                        train_summary=train_summary,
+                        val_summary=val_summary,
+                        history=history,
+                    )
+                except StopTraining as exc:
+                    history.mark_stopped(str(exc) or None)
+                    break
+        except Exception as exc:
+            self._run_callbacks("on_exception", exception=exc, history=history)
+            raise
 
         history.finalize(best_epoch=self.best_epoch, best_metric=self.best_metric)
         if self.best_state_dict is not None:

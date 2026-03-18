@@ -12,6 +12,7 @@ from vgl.engine import (
     FocalGammaScheduler,
     FloodingLevelScheduler,
     GeneralizedCrossEntropyScheduler,
+    GradientAccumulationScheduler,
     GradientNoiseInjection,
     GradientValueClipping,
     GradientCentralization,
@@ -21,6 +22,7 @@ from vgl.engine import (
     LdamMarginScheduler,
     LogitAdjustTauScheduler,
     Lookahead,
+    ModelCheckpoint,
     Poly1EpsilonScheduler,
     PosWeightScheduler,
     StopTraining,
@@ -148,6 +150,13 @@ class StopAfterFirstEpoch(Callback):
             raise StopTraining("requested stop")
 
 
+class RaiseOnFirstEpoch(Callback):
+    def on_epoch_end(self, trainer, epoch, train_summary, val_summary, history):
+        del trainer, train_summary, val_summary, history
+        if epoch == 1:
+            raise RuntimeError("boom")
+
+
 class StepRecordingCallback(Callback):
     def __init__(self):
         self.steps = []
@@ -159,6 +168,16 @@ class StepRecordingCallback(Callback):
     def on_after_optimizer_step(self, trainer, step):
         del trainer
         self.steps.append(("after", step))
+
+
+class CountingSGD(torch.optim.SGD):
+    def __init__(self, params, lr):
+        super().__init__(params, lr=lr)
+        self.step_calls = 0
+
+    def step(self, closure=None):
+        self.step_calls += 1
+        return super().step(closure)
 
 
 class GradientHolderModel(nn.Module):
@@ -597,6 +616,135 @@ def test_gradient_value_clipping_rejects_invalid_configuration():
 def test_gradient_centralization_rejects_invalid_configuration():
     with pytest.raises(TypeError, match="conv_only"):
         GradientCentralization(conv_only="yes")
+
+
+def test_gradient_accumulation_scheduler_rejects_invalid_configuration():
+    with pytest.raises(ValueError, match="scheduling must not be empty"):
+        GradientAccumulationScheduler({})
+
+    with pytest.raises(TypeError, match="epoch keys"):
+        GradientAccumulationScheduler({"1": 2})
+
+    with pytest.raises(ValueError, match="epoch keys must be >= 1"):
+        GradientAccumulationScheduler({0: 2})
+
+    with pytest.raises(TypeError, match="accumulation values"):
+        GradientAccumulationScheduler({1: 1.5})
+
+    with pytest.raises(ValueError, match="accumulation values must be >= 1"):
+        GradientAccumulationScheduler({1: 0})
+
+
+def test_gradient_accumulation_scheduler_updates_epoch_accumulation_and_restores_original_value():
+    callback = GradientAccumulationScheduler({1: 1, 2: 2})
+    trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=CountingSGD,
+        lr=1.0,
+        max_epochs=2,
+        accumulate_grad_batches=3,
+        callbacks=[callback],
+    )
+
+    history = trainer.fit([ToyBatch(1.0), ToyBatch(2.0), ToyBatch(3.0), ToyBatch(4.0)])
+
+    assert history["completed_epochs"] == 2
+    assert trainer.optimizer.step_calls == 6
+    assert trainer.global_step == 6
+    assert callback.current_accumulate_grad_batches == 2
+    assert trainer.accumulate_grad_batches == 3
+
+
+def test_model_checkpoint_rejects_invalid_configuration(tmp_path):
+    with pytest.raises(ValueError, match="filename"):
+        ModelCheckpoint(tmp_path, filename="")
+
+    with pytest.raises(ValueError, match="mode"):
+        ModelCheckpoint(tmp_path, mode="median")
+
+    with pytest.raises(TypeError, match="save_top_k"):
+        ModelCheckpoint(tmp_path, save_top_k=1.5)
+
+    with pytest.raises(ValueError, match="save_top_k"):
+        ModelCheckpoint(tmp_path, save_top_k=-2)
+
+    with pytest.raises(TypeError, match="save_last"):
+        ModelCheckpoint(tmp_path, save_last="yes")
+
+    with pytest.raises(TypeError, match="save_on_exception"):
+        ModelCheckpoint(tmp_path, save_on_exception="yes")
+
+    with pytest.raises(TypeError, match="every_n_epochs"):
+        ModelCheckpoint(tmp_path, every_n_epochs=1.5)
+
+    with pytest.raises(ValueError, match="every_n_epochs"):
+        ModelCheckpoint(tmp_path, every_n_epochs=0)
+
+
+def test_model_checkpoint_saves_top_k_and_last(tmp_path):
+    callback = ModelCheckpoint(
+        tmp_path / "checkpoints",
+        filename="epoch{epoch}",
+        monitor="val_loss",
+        mode="min",
+        save_top_k=1,
+        save_last=True,
+    )
+    trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=1.0,
+        max_epochs=3,
+        monitor="val_loss",
+        callbacks=[callback],
+    )
+
+    history = trainer.fit([ToyBatch(2.0)], val_data=[ToyBatch(1.0)])
+
+    assert history["completed_epochs"] == 3
+    assert callback.best_model_path is not None
+    assert callback.best_model_path.endswith("epoch2.ckpt")
+    assert callback.best_model_score == pytest.approx(1.0)
+    assert callback.kth_best_model_score == pytest.approx(1.0)
+    assert callback.last_model_path is not None
+    assert callback.last_model_path.endswith("last.ckpt")
+    assert (tmp_path / "checkpoints" / "epoch2.ckpt").exists()
+    assert not (tmp_path / "checkpoints" / "epoch1.ckpt").exists()
+    assert (tmp_path / "checkpoints" / "last.ckpt").exists()
+    payload = Trainer.load_checkpoint(tmp_path / "checkpoints" / "last.ckpt")
+    assert payload["metadata"]["epoch"] == 3
+    assert payload["metadata"]["global_step"] == 3
+    assert payload["metadata"]["tag"] == "last"
+
+
+def test_model_checkpoint_can_save_checkpoint_on_exception(tmp_path):
+    callback = ModelCheckpoint(
+        tmp_path / "checkpoints",
+        save_top_k=0,
+        save_last=False,
+        save_on_exception=True,
+    )
+    trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=1.0,
+        max_epochs=2,
+        callbacks=[callback, RaiseOnFirstEpoch()],
+    )
+
+    with pytest.raises(RuntimeError, match="boom"):
+        trainer.fit([ToyBatch(1.0)])
+
+    exception_path = tmp_path / "checkpoints" / "exception.ckpt"
+    assert exception_path.exists()
+    assert callback.exception_model_path == str(exception_path)
+    payload = Trainer.load_checkpoint(exception_path)
+    assert payload["metadata"]["tag"] == "exception"
+    assert payload["metadata"]["exception_type"] == "RuntimeError"
+    assert payload["metadata"]["exception_message"] == "boom"
 
 
 def test_gradient_value_clipping_clips_dense_gradients():

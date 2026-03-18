@@ -6,7 +6,13 @@ from torch import nn
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from vgl.dataloading import DataLoader, FullGraphSampler, ListDataset, TemporalEventRecord
+from vgl.dataloading import (
+    DataLoader,
+    FullGraphSampler,
+    ListDataset,
+    TemporalEventRecord,
+    TemporalNeighborSampler,
+)
 from vgl.engine import Trainer
 from vgl.graph import Graph
 from vgl.nn import TGATEncoder, TimeEncoder
@@ -55,6 +61,19 @@ def build_demo_loader():
     return DataLoader(
         dataset=ListDataset(samples),
         sampler=FullGraphSampler(),
+        batch_size=2,
+    )
+
+
+def build_sampled_demo_loader():
+    graph = build_demo_graph()
+    samples = [
+        TemporalEventRecord(graph=graph, src_index=0, dst_index=1, timestamp=3, label=1),
+        TemporalEventRecord(graph=graph, src_index=2, dst_index=0, timestamp=5, label=0),
+    ]
+    return DataLoader(
+        dataset=ListDataset(samples),
+        sampler=TemporalNeighborSampler(num_neighbors=[-1]),
         batch_size=2,
     )
 

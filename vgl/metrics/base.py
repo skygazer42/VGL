@@ -4,7 +4,8 @@ class Metric:
     def reset(self):
         raise NotImplementedError
 
-    def update(self, predictions, targets):
+    def update(self, predictions, targets, **kwargs):
+        del kwargs
         raise NotImplementedError
 
     def compute(self):

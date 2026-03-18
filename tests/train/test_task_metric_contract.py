@@ -1,8 +1,9 @@
 import torch
 
 from vgl import Graph
-from vgl.core.batch import LinkPredictionBatch, TemporalEventBatch
+from vgl.core.batch import LinkPredictionBatch, NodeBatch, TemporalEventBatch
 from vgl.data.sample import LinkPredictionRecord, TemporalEventRecord
+from vgl.data.sample import SampleRecord
 from vgl.train.tasks import (
     GraphClassificationTask,
     LinkPredictionTask,
@@ -28,6 +29,30 @@ def test_node_classification_task_masks_metric_predictions_and_targets():
 
     assert preds.shape == (2, 2)
     assert torch.equal(targets, torch.tensor([0, 1]))
+
+
+def test_node_classification_task_uses_seed_index_for_node_batches():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0], [1]]),
+        x=torch.randn(2, 4),
+        y=torch.tensor([0, 1]),
+        train_mask=torch.tensor([False, False]),
+        val_mask=torch.tensor([False, False]),
+        test_mask=torch.tensor([False, False]),
+    )
+    batch = NodeBatch.from_samples(
+        [
+            SampleRecord(graph=graph, metadata={"seed": 1}, sample_id="s1", subgraph_seed=1),
+        ]
+    )
+    task = NodeClassificationTask(target="y", split=("train_mask", "val_mask", "test_mask"))
+    logits = torch.tensor([[2.0, -1.0], [0.5, 1.5]])
+
+    preds = task.predictions_for_metrics(batch, logits, stage="train")
+    targets = task.targets(batch, stage="train")
+
+    assert preds.shape == (1, 2)
+    assert torch.equal(targets, torch.tensor([1]))
 
 
 def test_graph_classification_task_exposes_graph_targets():

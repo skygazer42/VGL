@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import torch
 
 from vgl.engine.monitoring import extract_monitor_value, is_improvement, resolve_monitor_mode
@@ -24,6 +26,9 @@ class Callback:
 
     def on_fit_end(self, trainer, history):
         del trainer, history
+
+    def on_exception(self, trainer, exception, history):
+        del trainer, exception, history
 
 
 class StopTraining(Exception):
@@ -1113,6 +1118,316 @@ class SymmetricCrossEntropyBetaScheduler(Callback):
             self._task.beta = float(self.original_beta)
 
 
+class GradientAccumulationScheduler(Callback):
+    def __init__(self, scheduling):
+        self.scheduling = self._normalize_scheduling(scheduling)
+        self.original_accumulate_grad_batches = None
+        self.current_accumulate_grad_batches = None
+        self._trainer = None
+
+    def _normalize_scheduling(self, scheduling):
+        if isinstance(scheduling, dict):
+            items = list(scheduling.items())
+        else:
+            items = list(scheduling)
+        if not items:
+            raise ValueError("scheduling must not be empty")
+
+        normalized = {}
+        for epoch, accumulate_grad_batches in items:
+            if not isinstance(epoch, int) or isinstance(epoch, bool):
+                raise TypeError("scheduling epoch keys must be integers")
+            if epoch < 1:
+                raise ValueError("scheduling epoch keys must be >= 1")
+            if not isinstance(accumulate_grad_batches, int) or isinstance(accumulate_grad_batches, bool):
+                raise TypeError("scheduling accumulation values must be integers")
+            if accumulate_grad_batches < 1:
+                raise ValueError("scheduling accumulation values must be >= 1")
+            normalized[int(epoch)] = int(accumulate_grad_batches)
+        return tuple(sorted(normalized.items()))
+
+    def _value_for_epoch(self, epoch):
+        if self.original_accumulate_grad_batches is None:
+            raise RuntimeError("GradientAccumulationScheduler is not initialized")
+        value = int(self.original_accumulate_grad_batches)
+        for start_epoch, scheduled_accumulation in self.scheduling:
+            if epoch < start_epoch:
+                break
+            value = int(scheduled_accumulation)
+        return value
+
+    def _apply_to_trainer(self):
+        if self._trainer is None:
+            return
+        if self.current_accumulate_grad_batches is None:
+            return
+        self._trainer.accumulate_grad_batches = int(self.current_accumulate_grad_batches)
+
+    def on_fit_start(self, trainer, history):
+        self._trainer = trainer
+        self.original_accumulate_grad_batches = int(trainer.accumulate_grad_batches)
+        next_epoch = int(history["completed_epochs"]) + 1
+        self.current_accumulate_grad_batches = self._value_for_epoch(next_epoch)
+        self._apply_to_trainer()
+
+    def state_dict(self):
+        return {
+            "original_accumulate_grad_batches": self.original_accumulate_grad_batches,
+            "current_accumulate_grad_batches": self.current_accumulate_grad_batches,
+        }
+
+    def load_state_dict(self, state):
+        original = state.get("original_accumulate_grad_batches")
+        if original is not None:
+            self.original_accumulate_grad_batches = int(original)
+        current = state.get("current_accumulate_grad_batches")
+        if current is not None:
+            self.current_accumulate_grad_batches = int(current)
+        self._apply_to_trainer()
+
+    def on_epoch_end(self, trainer, epoch, train_summary, val_summary, history):
+        del trainer, train_summary, val_summary
+        if epoch >= history["epochs"]:
+            return
+        self.current_accumulate_grad_batches = self._value_for_epoch(epoch + 1)
+        self._apply_to_trainer()
+
+    def on_fit_end(self, trainer, history):
+        del trainer, history
+        if self._trainer is None or self.original_accumulate_grad_batches is None:
+            return
+        self._trainer.accumulate_grad_batches = int(self.original_accumulate_grad_batches)
+
+
+class ModelCheckpoint(Callback):
+    def __init__(
+        self,
+        dirpath,
+        *,
+        filename="epoch{epoch}",
+        monitor=None,
+        mode=None,
+        save_top_k=1,
+        save_last=True,
+        save_on_exception=False,
+        every_n_epochs=1,
+    ):
+        if not isinstance(filename, str) or not filename:
+            raise ValueError("filename must be a non-empty string")
+        if mode not in {None, "min", "max"}:
+            raise ValueError("mode must be 'min', 'max', or None")
+        if not isinstance(save_top_k, int) or isinstance(save_top_k, bool):
+            raise TypeError("save_top_k must be an integer")
+        if save_top_k < -1:
+            raise ValueError("save_top_k must be >= -1")
+        if not isinstance(save_last, bool):
+            raise TypeError("save_last must be a bool")
+        if not isinstance(save_on_exception, bool):
+            raise TypeError("save_on_exception must be a bool")
+        if not isinstance(every_n_epochs, int) or isinstance(every_n_epochs, bool):
+            raise TypeError("every_n_epochs must be an integer")
+        if every_n_epochs < 1:
+            raise ValueError("every_n_epochs must be >= 1")
+
+        self.dirpath = Path(dirpath)
+        self.filename = filename
+        self.monitor = monitor
+        self.mode = mode
+        self.save_top_k = int(save_top_k)
+        self.save_last = bool(save_last)
+        self.save_on_exception = bool(save_on_exception)
+        self.every_n_epochs = int(every_n_epochs)
+        self.active_monitor = None
+        self.active_mode = None
+        self.best_k_models = []
+        self.best_model_path = None
+        self.best_model_score = None
+        self.kth_best_model_path = None
+        self.kth_best_model_score = None
+        self.last_model_path = None
+        self.exception_model_path = None
+
+    def _ranked_models(self):
+        reverse = self.active_mode == "max"
+        return sorted(self.best_k_models, key=lambda entry: entry["score"], reverse=reverse)
+
+    def _refresh_best_model_fields(self):
+        if not self.best_k_models:
+            self.best_model_path = None
+            self.best_model_score = None
+            self.kth_best_model_path = None
+            self.kth_best_model_score = None
+            return
+        ranked = self._ranked_models()
+        self.best_model_path = ranked[0]["path"]
+        self.best_model_score = float(ranked[0]["score"])
+        self.kth_best_model_path = ranked[-1]["path"]
+        self.kth_best_model_score = float(ranked[-1]["score"])
+
+    def _worst_saved_score(self):
+        if not self.best_k_models:
+            return None
+        ranked = self._ranked_models()
+        return float(ranked[-1]["score"])
+
+    def _format_checkpoint_path(self, *, epoch, monitor_value):
+        format_values = {"epoch": int(epoch)}
+        if monitor_value is not None:
+            format_values["monitor"] = float(monitor_value)
+        try:
+            filename = self.filename.format(**format_values)
+        except KeyError as exc:
+            missing = exc.args[0]
+            raise ValueError(f"filename template references unknown field '{missing}'") from exc
+        if not filename.endswith(".ckpt"):
+            filename = f"{filename}.ckpt"
+        return self.dirpath / filename
+
+    def _save_checkpoint(self, trainer, history, path, *, epoch, tag, monitor_value=None):
+        metadata = {
+            "epoch": int(epoch),
+            "global_step": int(trainer.global_step),
+            "tag": str(tag),
+        }
+        if self.active_monitor is not None and monitor_value is not None:
+            metadata["monitor"] = self.active_monitor
+            metadata["monitor_value"] = float(monitor_value)
+        trainer.save_training_checkpoint(path, history=history, metadata=metadata)
+
+    def _save_last_checkpoint(self, trainer, history, *, epoch):
+        if not self.save_last:
+            return
+        path = self.dirpath / "last.ckpt"
+        self._save_checkpoint(trainer, history, path, epoch=epoch, tag="last")
+        self.last_model_path = str(path)
+
+    def _save_exception_checkpoint(self, trainer, exception, history):
+        if not self.save_on_exception:
+            return
+        path = self.dirpath / "exception.ckpt"
+        metadata = {
+            "epoch": int(history["completed_epochs"]),
+            "global_step": int(trainer.global_step),
+            "tag": "exception",
+            "exception_type": exception.__class__.__name__,
+            "exception_message": str(exception),
+        }
+        trainer.save_training_checkpoint(path, history=history, metadata=metadata)
+        self.exception_model_path = str(path)
+
+    def _upsert_tracked_model(self, path, score):
+        path_str = str(path)
+        self.best_k_models = [entry for entry in self.best_k_models if entry["path"] != path_str]
+        self.best_k_models.append({"path": path_str, "score": float(score)})
+
+    def _trim_extra_models(self):
+        if self.save_top_k < 0:
+            return
+        if len(self.best_k_models) <= self.save_top_k:
+            return
+        ranked = self._ranked_models()
+        kept = ranked[: self.save_top_k]
+        removed = ranked[self.save_top_k :]
+        self.best_k_models = kept
+        for entry in removed:
+            remove_path = Path(entry["path"])
+            if self.save_last and self.last_model_path == entry["path"]:
+                continue
+            if remove_path.exists():
+                remove_path.unlink()
+
+    def on_fit_start(self, trainer, history):
+        self.dirpath.mkdir(parents=True, exist_ok=True)
+        if self.save_top_k != 0 or self.monitor is not None:
+            self.active_monitor = self.monitor or history["monitor"]
+            self.active_mode = resolve_monitor_mode(
+                self.active_monitor,
+                mode=self.mode,
+                invalid_mode_message="mode must be 'min' or 'max'",
+            )
+        else:
+            self.active_monitor = None
+            self.active_mode = None
+        self._refresh_best_model_fields()
+
+    def state_dict(self):
+        return {
+            "active_monitor": self.active_monitor,
+            "active_mode": self.active_mode,
+            "best_k_models": [dict(entry) for entry in self.best_k_models],
+            "best_model_path": self.best_model_path,
+            "best_model_score": self.best_model_score,
+            "kth_best_model_path": self.kth_best_model_path,
+            "kth_best_model_score": self.kth_best_model_score,
+            "last_model_path": self.last_model_path,
+            "exception_model_path": self.exception_model_path,
+        }
+
+    def load_state_dict(self, state):
+        state_monitor = state.get("active_monitor")
+        state_mode = state.get("active_mode")
+        if self.active_monitor is not None and state_monitor not in {None, self.active_monitor}:
+            raise ValueError("ModelCheckpoint monitor does not match checkpoint state")
+        if self.active_mode is not None and state_mode not in {None, self.active_mode}:
+            raise ValueError("ModelCheckpoint mode does not match checkpoint state")
+        if state_monitor is not None:
+            self.active_monitor = state_monitor
+        if state_mode is not None:
+            self.active_mode = state_mode
+        self.best_k_models = [
+            {"path": str(entry["path"]), "score": float(entry["score"])}
+            for entry in state.get("best_k_models", [])
+        ]
+        self.best_model_path = state.get("best_model_path")
+        best_score = state.get("best_model_score")
+        self.best_model_score = None if best_score is None else float(best_score)
+        self.kth_best_model_path = state.get("kth_best_model_path")
+        kth_score = state.get("kth_best_model_score")
+        self.kth_best_model_score = None if kth_score is None else float(kth_score)
+        self.last_model_path = state.get("last_model_path")
+        self.exception_model_path = state.get("exception_model_path")
+        self._refresh_best_model_fields()
+
+    def on_epoch_end(self, trainer, epoch, train_summary, val_summary, history):
+        if epoch % self.every_n_epochs != 0:
+            return
+
+        self._save_last_checkpoint(trainer, history, epoch=epoch)
+        if self.save_top_k == 0:
+            return
+        if self.active_monitor is None or self.active_mode is None:
+            raise RuntimeError("ModelCheckpoint monitor is not configured")
+
+        monitor_value = extract_monitor_value(
+            self.active_monitor,
+            train_summary=train_summary,
+            val_summary=val_summary,
+            error_subject="ModelCheckpoint monitor",
+        )
+        should_save = self.save_top_k < 0 or len(self.best_k_models) < self.save_top_k
+        if not should_save:
+            worst_score = self._worst_saved_score()
+            should_save = is_improvement(monitor_value, worst_score, self.active_mode)
+        if not should_save:
+            return
+
+        model_path = self._format_checkpoint_path(epoch=epoch, monitor_value=monitor_value)
+        self._save_checkpoint(
+            trainer,
+            history,
+            model_path,
+            epoch=epoch,
+            tag="top_k",
+            monitor_value=monitor_value,
+        )
+        self._upsert_tracked_model(model_path, monitor_value)
+        self._trim_extra_models()
+        self._refresh_best_model_fields()
+
+    def on_exception(self, trainer, exception, history):
+        self._save_exception_checkpoint(trainer, exception, history)
+
+
 class WeightDecayScheduler(Callback):
     def __init__(self, start_factor, end_factor, *, start_epoch=1, end_epoch=1):
         if start_factor < 0.0:
@@ -1535,6 +1850,8 @@ __all__ = [
     "GeneralizedCrossEntropyScheduler",
     "Poly1EpsilonScheduler",
     "SymmetricCrossEntropyBetaScheduler",
+    "GradientAccumulationScheduler",
+    "ModelCheckpoint",
     "WeightDecayScheduler",
     "GradualUnfreezing",
     "ExponentialMovingAverage",

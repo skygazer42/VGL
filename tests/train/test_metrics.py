@@ -2,7 +2,7 @@ import pytest
 import torch
 
 from vgl.metrics import build_metric as domain_build_metric
-from vgl.train.metrics import Accuracy, build_metric
+from vgl.train.metrics import Accuracy, FilteredHitsAtK, FilteredMRR, HitsAtK, MRR, build_metric
 
 
 def test_legacy_train_package_reexports_build_metric():
@@ -40,6 +40,80 @@ def test_accuracy_rejects_shape_mismatch():
         metric.update(torch.randn(2, 3), torch.tensor([1]))
 
 
+def test_mrr_computes_mean_reciprocal_rank_from_query_groups():
+    class Batch:
+        query_index = torch.tensor([0, 0, 0, 1, 1, 1])
+
+    metric = MRR()
+    metric.update(
+        torch.tensor([3.0, 1.0, 0.0, 0.1, 0.7, 0.2]),
+        torch.tensor([1.0, 0.0, 0.0, 1.0, 0.0, 0.0]),
+        batch=Batch(),
+    )
+
+    assert metric.compute() == pytest.approx((1.0 + (1.0 / 3.0)) / 2.0)
+
+
+def test_hits_at_k_computes_hit_rate_from_query_groups():
+    class Batch:
+        query_index = torch.tensor([0, 0, 0, 1, 1, 1])
+
+    hits1 = HitsAtK(1)
+    hits3 = HitsAtK(3)
+    predictions = torch.tensor([3.0, 1.0, 0.0, 0.1, 0.7, 0.2])
+    targets = torch.tensor([1.0, 0.0, 0.0, 1.0, 0.0, 0.0])
+
+    hits1.update(predictions, targets, batch=Batch())
+    hits3.update(predictions, targets, batch=Batch())
+
+    assert hits1.compute() == pytest.approx(0.5)
+    assert hits3.compute() == pytest.approx(1.0)
+
+
+def test_ranking_metrics_require_query_groups():
+    metric = MRR()
+
+    with pytest.raises(ValueError, match="query_index"):
+        metric.update(torch.tensor([1.0, 0.0]), torch.tensor([1.0, 0.0]))
+
+
+def test_filtered_mrr_ignores_masked_candidates():
+    class Batch:
+        query_index = torch.tensor([0, 0, 0])
+        filter_mask = torch.tensor([False, True, False])
+
+    metric = FilteredMRR()
+    metric.update(
+        torch.tensor([0.8, 0.9, 0.1]),
+        torch.tensor([1.0, 0.0, 0.0]),
+        batch=Batch(),
+    )
+
+    assert metric.compute() == pytest.approx(1.0)
+
+
+def test_filtered_hits_at_k_ignores_masked_candidates():
+    class Batch:
+        query_index = torch.tensor([0, 0, 0])
+        filter_mask = torch.tensor([False, True, False])
+
+    metric = FilteredHitsAtK(1)
+    metric.update(
+        torch.tensor([0.8, 0.9, 0.1]),
+        torch.tensor([1.0, 0.0, 0.0]),
+        batch=Batch(),
+    )
+
+    assert metric.compute() == pytest.approx(1.0)
+
+
 def test_build_metric_rejects_unknown_name():
     with pytest.raises(ValueError, match="Unsupported metric"):
         build_metric("f1")
+
+
+def test_build_metric_supports_ranking_metrics():
+    assert build_metric("mrr").name == "mrr"
+    assert build_metric("hits@10").name == "hits@10"
+    assert build_metric("filtered_mrr").name == "filtered_mrr"
+    assert build_metric("filtered_hits@10").name == "filtered_hits@10"

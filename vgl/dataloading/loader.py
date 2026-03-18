@@ -1,5 +1,5 @@
-from vgl.dataloading.records import LinkPredictionRecord, TemporalEventRecord
-from vgl.graph.batch import GraphBatch, LinkPredictionBatch, TemporalEventBatch
+from vgl.dataloading.records import LinkPredictionRecord, SampleRecord, TemporalEventRecord
+from vgl.graph.batch import GraphBatch, LinkPredictionBatch, NodeBatch, TemporalEventBatch
 
 
 class Loader:
@@ -23,6 +23,8 @@ class Loader:
             return TemporalEventBatch.from_records(items)
         if items and isinstance(items[0], LinkPredictionRecord):
             return LinkPredictionBatch.from_records(items)
+        if items and isinstance(items[0], SampleRecord) and items[0].subgraph_seed is not None and self.label_source is None:
+            return NodeBatch.from_samples(items)
         if items and hasattr(items[0], "graph") and self.label_source is not None and self.label_key is not None:
             return GraphBatch.from_samples(
                 items,
@@ -33,11 +35,18 @@ class Loader:
 
     def __iter__(self):
         batch = []
+        seed_count = 0
         for item in self._dataset_iter():
-            batch.append(self.sampler.sample(item))
-            if len(batch) == self.batch_size:
+            sampled = self.sampler.sample(item)
+            if isinstance(sampled, (list, tuple)):
+                batch.extend(sampled)
+            else:
+                batch.append(sampled)
+            seed_count += 1
+            if seed_count == self.batch_size:
                 yield self._build_batch(batch)
                 batch = []
+                seed_count = 0
         if batch:
             yield self._build_batch(batch)
 

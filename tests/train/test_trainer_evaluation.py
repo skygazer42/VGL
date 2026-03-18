@@ -13,10 +13,12 @@ from vgl.engine import (
     FocalGammaScheduler,
     FloodingLevelScheduler,
     GeneralizedCrossEntropyScheduler,
+    GradientAccumulationScheduler,
     GradientNoiseInjection,
     LabelSmoothingScheduler,
     LdamMarginScheduler,
     LogitAdjustTauScheduler,
+    ModelCheckpoint,
     ExponentialMovingAverage,
     GSAM,
     GradualUnfreezing,
@@ -1901,4 +1903,135 @@ def test_trainer_can_resume_gradient_noise_injection_callback_from_checkpoint(tm
         resumed_trainer.model.weight.detach(),
         uninterrupted_trainer.model.weight.detach(),
     )
+    assert resumed_history["best_epoch"] == uninterrupted_history["best_epoch"]
+
+
+def test_trainer_can_resume_gradient_accumulation_scheduler_callback_from_checkpoint(tmp_path):
+    checkpoint = tmp_path / "gradient-accumulation-resume.pt"
+    paused_callback = GradientAccumulationScheduler({2: 2, 3: 3})
+    paused_trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=0.1,
+        max_epochs=4,
+        accumulate_grad_batches=1,
+        callbacks=[paused_callback, SaveAndStop(checkpoint, stop_epoch=2)],
+    )
+
+    with pytest.raises(RuntimeError, match="pause"):
+        paused_trainer.fit([ToyBatch(1.0), ToyBatch(2.0), ToyBatch(3.0), ToyBatch(4.0)])
+
+    resumed_callback = GradientAccumulationScheduler({2: 2, 3: 3})
+    resumed_trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=0.1,
+        max_epochs=4,
+        accumulate_grad_batches=1,
+        callbacks=[resumed_callback],
+    )
+    resumed_payload = resumed_trainer.restore_training_checkpoint(checkpoint)
+    resumed_history = resumed_trainer.fit([ToyBatch(1.0), ToyBatch(2.0), ToyBatch(3.0), ToyBatch(4.0)])
+
+    uninterrupted_callback = GradientAccumulationScheduler({2: 2, 3: 3})
+    uninterrupted_trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=0.1,
+        max_epochs=4,
+        accumulate_grad_batches=1,
+        callbacks=[uninterrupted_callback],
+    )
+    uninterrupted_history = uninterrupted_trainer.fit(
+        [ToyBatch(1.0), ToyBatch(2.0), ToyBatch(3.0), ToyBatch(4.0)]
+    )
+
+    assert resumed_payload["metadata"] == {"phase": "resume"}
+    assert resumed_history["completed_epochs"] == 4
+    assert resumed_trainer.global_step == uninterrupted_trainer.global_step == 10
+    assert resumed_callback.current_accumulate_grad_batches == uninterrupted_callback.current_accumulate_grad_batches == 3
+    assert resumed_trainer.accumulate_grad_batches == uninterrupted_trainer.accumulate_grad_batches == 1
+    assert torch.allclose(
+        resumed_trainer.model.weight.detach(),
+        uninterrupted_trainer.model.weight.detach(),
+    )
+    assert resumed_history["best_epoch"] == uninterrupted_history["best_epoch"]
+
+
+def test_trainer_can_resume_model_checkpoint_callback_from_checkpoint(tmp_path):
+    checkpoint = tmp_path / "model-checkpoint-resume.pt"
+    checkpoint_dir = tmp_path / "managed-checkpoints"
+    paused_callback = ModelCheckpoint(
+        checkpoint_dir,
+        filename="epoch{epoch}",
+        monitor="val_loss",
+        mode="min",
+        save_top_k=2,
+        save_last=True,
+    )
+    paused_trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=1.0,
+        max_epochs=4,
+        monitor="val_loss",
+        callbacks=[paused_callback, SaveAndStop(checkpoint, stop_epoch=2)],
+    )
+
+    with pytest.raises(RuntimeError, match="pause"):
+        paused_trainer.fit([ToyBatch(2.0)], val_data=[ToyBatch(1.0)])
+
+    resumed_callback = ModelCheckpoint(
+        checkpoint_dir,
+        filename="epoch{epoch}",
+        monitor="val_loss",
+        mode="min",
+        save_top_k=2,
+        save_last=True,
+    )
+    resumed_trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=1.0,
+        max_epochs=4,
+        monitor="val_loss",
+        callbacks=[resumed_callback],
+    )
+    resumed_payload = resumed_trainer.restore_training_checkpoint(checkpoint)
+    resumed_history = resumed_trainer.fit([ToyBatch(2.0)], val_data=[ToyBatch(1.0)])
+
+    uninterrupted_callback = ModelCheckpoint(
+        tmp_path / "uninterrupted-checkpoints",
+        filename="epoch{epoch}",
+        monitor="val_loss",
+        mode="min",
+        save_top_k=2,
+        save_last=True,
+    )
+    uninterrupted_trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=1.0,
+        max_epochs=4,
+        monitor="val_loss",
+        callbacks=[uninterrupted_callback],
+    )
+    uninterrupted_history = uninterrupted_trainer.fit([ToyBatch(2.0)], val_data=[ToyBatch(1.0)])
+
+    assert resumed_payload["metadata"] == {"phase": "resume"}
+    assert resumed_history["completed_epochs"] == 4
+    assert resumed_trainer.global_step == uninterrupted_trainer.global_step == 4
+    assert resumed_callback.best_model_score == pytest.approx(uninterrupted_callback.best_model_score)
+    assert resumed_callback.kth_best_model_score == pytest.approx(uninterrupted_callback.kth_best_model_score)
+    assert resumed_callback.best_model_path is not None
+    assert resumed_callback.best_model_path.endswith("epoch2.ckpt")
+    assert resumed_callback.last_model_path is not None
+    assert resumed_callback.last_model_path.endswith("last.ckpt")
+    assert (checkpoint_dir / "last.ckpt").exists()
     assert resumed_history["best_epoch"] == uninterrupted_history["best_epoch"]

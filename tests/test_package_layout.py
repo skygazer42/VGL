@@ -5,7 +5,16 @@ from vgl.data.loader import Loader as LegacyLoader
 
 def test_domain_packages_expose_preferred_import_paths():
     from vgl.dataloading import DataLoader as DomainDataLoader
-    from vgl.dataloading import FullGraphSampler, ListDataset
+    from vgl.dataloading import (
+        CandidateLinkSampler,
+        FullGraphSampler,
+        HardNegativeLinkSampler,
+        LinkNeighborSampler,
+        NodeNeighborSampler,
+        ListDataset,
+        TemporalNeighborSampler,
+        UniformNegativeLinkSampler,
+    )
     from vgl.engine import (
         ASAM,
         AdaptiveGradientClipping,
@@ -19,6 +28,7 @@ def test_domain_packages_expose_preferred_import_paths():
         FocalGammaScheduler,
         FloodingLevelScheduler,
         GeneralizedCrossEntropyScheduler,
+        GradientAccumulationScheduler,
         GradientNoiseInjection,
         GradientValueClipping,
         GradientCentralization,
@@ -28,6 +38,7 @@ def test_domain_packages_expose_preferred_import_paths():
         LabelSmoothingScheduler,
         LdamMarginScheduler,
         LogitAdjustTauScheduler,
+        ModelCheckpoint,
         Poly1EpsilonScheduler,
         PosWeightScheduler,
         LayerwiseLrDecay,
@@ -43,9 +54,9 @@ def test_domain_packages_expose_preferred_import_paths():
         save_checkpoint,
     )
     from vgl.graph import Graph as DomainGraph
-    from vgl.graph import GraphBatch, GraphSchema, GraphView
+    from vgl.graph import GraphBatch, GraphSchema, GraphView, NodeBatch
     from vgl.graph import LinkPredictionBatch, TemporalEventBatch
-    from vgl.metrics import Accuracy, Metric, build_metric
+    from vgl.metrics import Accuracy, FilteredHitsAtK, FilteredMRR, HitsAtK, Metric, MRR, build_metric
     from vgl.tasks import (
         BootstrapTask,
         ConfidencePenaltyTask,
@@ -60,22 +71,28 @@ def test_domain_packages_expose_preferred_import_paths():
         Task,
         TemporalEventPredictionTask,
     )
-    from vgl.transforms import IdentityTransform
+    from vgl.transforms import IdentityTransform, RandomLinkSplit
     from vgl.train import ASAM as LegacyASAM
     from vgl.train import BootstrapBetaScheduler as LegacyBootstrapBetaScheduler
     from vgl.train import BootstrapTask as LegacyBootstrapTask
     from vgl.train import ConfidencePenaltyScheduler as LegacyConfidencePenaltyScheduler
     from vgl.train import ConfidencePenaltyTask as LegacyConfidencePenaltyTask
+    from vgl.train import FilteredHitsAtK as LegacyFilteredHitsAtK
+    from vgl.train import FilteredMRR as LegacyFilteredMRR
     from vgl.train import FloodingLevelScheduler as LegacyFloodingLevelScheduler
     from vgl.train import FloodingTask as LegacyFloodingTask
     from vgl.train import GeneralizedCrossEntropyScheduler as LegacyGeneralizedCrossEntropyScheduler
+    from vgl.train import GradientAccumulationScheduler as LegacyGradientAccumulationScheduler
     from vgl.train import FocalGammaScheduler as LegacyFocalGammaScheduler
     from vgl.train import GeneralizedCrossEntropyTask as LegacyGeneralizedCrossEntropyTask
     from vgl.train import GSAM as LegacyGSAM
     from vgl.train import GradientNoiseInjection as LegacyGradientNoiseInjection
     from vgl.train import GradientValueClipping as LegacyGradientValueClipping
+    from vgl.train import HitsAtK as LegacyHitsAtK
     from vgl.train import LdamMarginScheduler as LegacyLdamMarginScheduler
     from vgl.train import LogitAdjustTauScheduler as LegacyLogitAdjustTauScheduler
+    from vgl.train import ModelCheckpoint as LegacyModelCheckpoint
+    from vgl.train import MRR as LegacyMRR
     from vgl.train import Poly1CrossEntropyTask as LegacyPoly1CrossEntropyTask
     from vgl.train import Poly1EpsilonScheduler as LegacyPoly1EpsilonScheduler
     from vgl.train import PosWeightScheduler as LegacyPosWeightScheduler
@@ -84,6 +101,12 @@ def test_domain_packages_expose_preferred_import_paths():
     from vgl.train import SymmetricCrossEntropyBetaScheduler as LegacySymmetricCrossEntropyBetaScheduler
     from vgl.train import SymmetricCrossEntropyTask as LegacySymmetricCrossEntropyTask
     from vgl.train import WeightDecayScheduler as LegacyWeightDecayScheduler
+    from vgl.data import CandidateLinkSampler as LegacyCandidateLinkSampler
+    from vgl.data import HardNegativeLinkSampler as LegacyHardNegativeLinkSampler
+    from vgl.data import LinkNeighborSampler as LegacyLinkNeighborSampler
+    from vgl.data import NodeNeighborSampler as LegacyNodeNeighborSampler
+    from vgl.data import TemporalNeighborSampler as LegacyTemporalNeighborSampler
+    from vgl.data import UniformNegativeLinkSampler as LegacyUniformNegativeLinkSampler
 
     assert DomainGraph is Graph
     assert Graph is LegacyGraph
@@ -94,8 +117,15 @@ def test_domain_packages_expose_preferred_import_paths():
     assert GraphSchema.__name__ == "GraphSchema"
     assert GraphView.__name__ == "GraphView"
     assert LinkPredictionBatch.__name__ == "LinkPredictionBatch"
+    assert NodeBatch.__name__ == "NodeBatch"
     assert TemporalEventBatch.__name__ == "TemporalEventBatch"
+    assert CandidateLinkSampler.__name__ == "CandidateLinkSampler"
     assert FullGraphSampler.__name__ == "FullGraphSampler"
+    assert HardNegativeLinkSampler.__name__ == "HardNegativeLinkSampler"
+    assert LinkNeighborSampler.__name__ == "LinkNeighborSampler"
+    assert NodeNeighborSampler.__name__ == "NodeNeighborSampler"
+    assert TemporalNeighborSampler.__name__ == "TemporalNeighborSampler"
+    assert UniformNegativeLinkSampler.__name__ == "UniformNegativeLinkSampler"
     assert ListDataset.__name__ == "ListDataset"
     assert ASAM.__name__ == "ASAM"
     assert AdaptiveGradientClipping.__name__ == "AdaptiveGradientClipping"
@@ -109,6 +139,7 @@ def test_domain_packages_expose_preferred_import_paths():
     assert FloodingLevelScheduler.__name__ == "FloodingLevelScheduler"
     assert GeneralizedCrossEntropyScheduler.__name__ == "GeneralizedCrossEntropyScheduler"
     assert SymmetricCrossEntropyBetaScheduler.__name__ == "SymmetricCrossEntropyBetaScheduler"
+    assert GradientAccumulationScheduler.__name__ == "GradientAccumulationScheduler"
     assert GradientNoiseInjection.__name__ == "GradientNoiseInjection"
     assert GradientValueClipping.__name__ == "GradientValueClipping"
     assert GradientCentralization.__name__ == "GradientCentralization"
@@ -117,6 +148,7 @@ def test_domain_packages_expose_preferred_import_paths():
     assert LabelSmoothingScheduler.__name__ == "LabelSmoothingScheduler"
     assert LdamMarginScheduler.__name__ == "LdamMarginScheduler"
     assert LogitAdjustTauScheduler.__name__ == "LogitAdjustTauScheduler"
+    assert ModelCheckpoint.__name__ == "ModelCheckpoint"
     assert PosWeightScheduler.__name__ == "PosWeightScheduler"
     assert WeightDecayScheduler.__name__ == "WeightDecayScheduler"
     assert GSAM.__name__ == "GSAM"
@@ -125,15 +157,21 @@ def test_domain_packages_expose_preferred_import_paths():
     assert LegacyBootstrapBetaScheduler is BootstrapBetaScheduler
     assert LegacyBootstrapTask is BootstrapTask
     assert LegacyConfidencePenaltyScheduler is ConfidencePenaltyScheduler
+    assert LegacyFilteredHitsAtK is FilteredHitsAtK
+    assert LegacyFilteredMRR is FilteredMRR
     assert LegacyFloodingLevelScheduler is FloodingLevelScheduler
     assert LegacyGeneralizedCrossEntropyScheduler is GeneralizedCrossEntropyScheduler
+    assert LegacyGradientAccumulationScheduler is GradientAccumulationScheduler
     assert LegacySymmetricCrossEntropyBetaScheduler is SymmetricCrossEntropyBetaScheduler
     assert LegacyFocalGammaScheduler is FocalGammaScheduler
     assert LegacyGSAM is GSAM
     assert LegacyGradientNoiseInjection is GradientNoiseInjection
     assert LegacyGradientValueClipping is GradientValueClipping
+    assert LegacyHitsAtK is HitsAtK
     assert LegacyLdamMarginScheduler is LdamMarginScheduler
     assert LegacyLogitAdjustTauScheduler is LogitAdjustTauScheduler
+    assert LegacyModelCheckpoint is ModelCheckpoint
+    assert LegacyMRR is MRR
     assert LegacyPosWeightScheduler is PosWeightScheduler
     assert LegacyWeightDecayScheduler is WeightDecayScheduler
     assert SAM.__name__ == "SAM"
@@ -148,7 +186,11 @@ def test_domain_packages_expose_preferred_import_paths():
     assert callable(restore_checkpoint)
     assert Trainer.__name__ == "Trainer"
     assert Accuracy.__name__ == "Accuracy"
+    assert FilteredHitsAtK.__name__ == "FilteredHitsAtK"
+    assert FilteredMRR.__name__ == "FilteredMRR"
+    assert HitsAtK.__name__ == "HitsAtK"
     assert Metric.__name__ == "Metric"
+    assert MRR.__name__ == "MRR"
     assert callable(build_metric)
     assert RDropTask.__name__ == "RDropTask"
     assert LegacyRDropTask is RDropTask
@@ -170,6 +212,13 @@ def test_domain_packages_expose_preferred_import_paths():
     assert LinkPredictionTask.__name__ == "LinkPredictionTask"
     assert TemporalEventPredictionTask.__name__ == "TemporalEventPredictionTask"
     assert IdentityTransform.__name__ == "IdentityTransform"
+    assert RandomLinkSplit.__name__ == "RandomLinkSplit"
+    assert LegacyCandidateLinkSampler is CandidateLinkSampler
+    assert LegacyHardNegativeLinkSampler is HardNegativeLinkSampler
+    assert LegacyLinkNeighborSampler is LinkNeighborSampler
+    assert LegacyNodeNeighborSampler is NodeNeighborSampler
+    assert LegacyTemporalNeighborSampler is TemporalNeighborSampler
+    assert LegacyUniformNegativeLinkSampler is UniformNegativeLinkSampler
 
 
 def test_legacy_train_package_reexports_engine_evaluator():

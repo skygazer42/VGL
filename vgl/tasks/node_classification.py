@@ -66,6 +66,13 @@ class NodeClassificationTask(Task):
             return next(iter(graph.nodes.values())).data
         raise ValueError("node_type is required for multi-type node classification")
 
+    def _graph_and_index(self, batch, stage):
+        if hasattr(batch, "seed_index") and hasattr(batch, "graph"):
+            return batch.graph, batch.seed_index
+        graph = batch
+        node_data = self._node_data(graph)
+        return graph, node_data[self._mask_key(stage)]
+
     def loss(self, graph, logits, stage):
         logits = self.predictions_for_metrics(graph, logits, stage)
         targets = self.targets(graph, stage)
@@ -118,12 +125,11 @@ class NodeClassificationTask(Task):
         )
 
     def targets(self, graph, stage):
+        graph, index = self._graph_and_index(graph, stage)
         node_data = self._node_data(graph)
-        mask = node_data[self._mask_key(stage)]
         target = node_data[self.target]
-        return target[mask]
+        return target[index]
 
     def predictions_for_metrics(self, graph, predictions, stage):
-        node_data = self._node_data(graph)
-        mask = node_data[self._mask_key(stage)]
-        return predictions[mask]
+        _, index = self._graph_and_index(graph, stage)
+        return predictions[index]

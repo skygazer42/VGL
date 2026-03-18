@@ -25,9 +25,12 @@ from vgl import (
     FocalGammaScheduler,
     FloodingLevelScheduler,
     GeneralizedCrossEntropyScheduler,
+    GradientAccumulationScheduler,
     GradientNoiseInjection,
     GradientValueClipping,
     GATConv,
+    FilteredHitsAtK,
+    FilteredMRR,
     GeneralConv,
     GATv2Conv,
     GCN2Conv,
@@ -63,10 +66,16 @@ from vgl import (
     LGConv,
     MixHopConv,
     LinkPredictionBatch,
+    NodeBatch,
     LinkPredictionRecord,
     LinkPredictionTask,
+    LinkNeighborSampler,
+    NodeNeighborSampler,
     ListDataset,
     Loader,
+    CandidateLinkSampler,
+    HardNegativeLinkSampler,
+    HitsAtK,
     LEConv,
     FullGraphSampler,
     FloodingTask,
@@ -82,6 +91,7 @@ from vgl import (
     SampleRecord,
     SimpleConv,
     TemporalEventRecord,
+    UniformNegativeLinkSampler,
     MessagePassing,
     NAGphormerEncoder,
     SSGConv,
@@ -91,6 +101,7 @@ from vgl import (
     RGATConv,
     SAM,
     MeanMessageAggregator,
+    MRR,
     SAGEConv,
     SGFormerEncoder,
     SGFormerEncoderLayer,
@@ -114,6 +125,7 @@ from vgl import (
     LabelSmoothingScheduler,
     LdamMarginScheduler,
     LogitAdjustTauScheduler,
+    ModelCheckpoint,
     PosWeightScheduler,
     WeightDecayScheduler,
     NodeClassificationTask,
@@ -122,6 +134,7 @@ from vgl import (
     HistoryLogger,
     TemporalEventPredictionTask,
     TemporalEventBatch,
+    TemporalNeighborSampler,
     TGNMemory,
     TGATEncoder,
     TGATLayer,
@@ -163,6 +176,9 @@ def test_package_exposes_broad_vgl_root_surface():
     assert FocalGammaScheduler.__name__ == "FocalGammaScheduler"
     assert FloodingLevelScheduler.__name__ == "FloodingLevelScheduler"
     assert GeneralizedCrossEntropyScheduler.__name__ == "GeneralizedCrossEntropyScheduler"
+    assert GradientAccumulationScheduler.__name__ == "GradientAccumulationScheduler"
+    assert FilteredHitsAtK.__name__ == "FilteredHitsAtK"
+    assert FilteredMRR.__name__ == "FilteredMRR"
     assert SymmetricCrossEntropyBetaScheduler.__name__ == "SymmetricCrossEntropyBetaScheduler"
     assert FloodingTask.__name__ == "FloodingTask"
     assert GradientNoiseInjection.__name__ == "GradientNoiseInjection"
@@ -190,12 +206,20 @@ def test_package_exposes_broad_vgl_root_surface():
     assert HANConv.__name__ == "HANConv"
     assert HEATConv.__name__ == "HEATConv"
     assert LinkPredictionBatch.__name__ == "LinkPredictionBatch"
+    assert NodeBatch.__name__ == "NodeBatch"
+    assert HardNegativeLinkSampler.__name__ == "HardNegativeLinkSampler"
+    assert HitsAtK.__name__ == "HitsAtK"
     assert LEConv.__name__ == "LEConv"
     assert LightGCNConv.__name__ == "LightGCNConv"
+    assert LinkNeighborSampler.__name__ == "LinkNeighborSampler"
+    assert NodeNeighborSampler.__name__ == "NodeNeighborSampler"
     assert MFConv.__name__ == "MFConv"
     assert MixHopConv.__name__ == "MixHopConv"
+    assert MRR.__name__ == "MRR"
     assert NNConv.__name__ == "NNConv"
     assert TemporalEventBatch.__name__ == "TemporalEventBatch"
+    assert TemporalNeighborSampler.__name__ == "TemporalNeighborSampler"
+    assert UniformNegativeLinkSampler.__name__ == "UniformNegativeLinkSampler"
     assert PointNetConv.__name__ == "PointNetConv"
     assert PointTransformerConv.__name__ == "PointTransformerConv"
     assert Poly1CrossEntropyTask.__name__ == "Poly1CrossEntropyTask"
@@ -211,6 +235,7 @@ def test_package_exposes_broad_vgl_root_surface():
     assert LGConv.__name__ == "LGConv"
     assert Loader.__name__ == "Loader"
     assert Lookahead.__name__ == "Lookahead"
+    assert CandidateLinkSampler.__name__ == "CandidateLinkSampler"
     assert FullGraphSampler.__name__ == "FullGraphSampler"
     assert MeanMessageAggregator.__name__ == "MeanMessageAggregator"
     assert NodeSeedSubgraphSampler.__name__ == "NodeSeedSubgraphSampler"
@@ -252,6 +277,7 @@ def test_package_exposes_broad_vgl_root_surface():
     assert LabelSmoothingScheduler.__name__ == "LabelSmoothingScheduler"
     assert LdamMarginScheduler.__name__ == "LdamMarginScheduler"
     assert LogitAdjustTauScheduler.__name__ == "LogitAdjustTauScheduler"
+    assert ModelCheckpoint.__name__ == "ModelCheckpoint"
     assert PosWeightScheduler.__name__ == "PosWeightScheduler"
     assert WeightDecayScheduler.__name__ == "WeightDecayScheduler"
     assert GradualUnfreezing.__name__ == "GradualUnfreezing"
