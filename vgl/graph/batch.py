@@ -73,6 +73,13 @@ def _node_count(store):
     return 0
 
 
+def _transfer_tensor(tensor: torch.Tensor, *, device=None, dtype=None, non_blocking: bool = False) -> torch.Tensor:
+    can_cast = dtype is not None and (tensor.is_floating_point() or tensor.is_complex())
+    if can_cast:
+        return tensor.to(device=device, dtype=dtype, non_blocking=non_blocking)
+    return tensor.to(device=device, non_blocking=non_blocking)
+
+
 def _require_int(value: SupportsInt | None, *, field_name: str) -> int:
     if value is None:
         raise ValueError(f"{field_name} must not be None")
@@ -301,13 +308,28 @@ class GraphBatch:
                 graph.to(device=device, dtype=dtype, non_blocking=non_blocking)
                 for graph in self.graphs
             ],
-            graph_index=self.graph_index.to(device=device, non_blocking=non_blocking),
+            graph_index=_transfer_tensor(
+                self.graph_index,
+                device=device,
+                dtype=dtype,
+                non_blocking=non_blocking,
+            ),
             graph_ptr=None
             if self.graph_ptr is None
-            else self.graph_ptr.to(device=device, non_blocking=non_blocking),
+            else _transfer_tensor(
+                self.graph_ptr,
+                device=device,
+                dtype=dtype,
+                non_blocking=non_blocking,
+            ),
             labels=None
             if self.labels is None
-            else self.labels.to(device=device, non_blocking=non_blocking),
+            else _transfer_tensor(
+                self.labels,
+                device=device,
+                dtype=dtype,
+                non_blocking=non_blocking,
+            ),
             metadata=self.metadata,
         )
 
@@ -373,7 +395,12 @@ class NodeBatch:
     def to(self, device=None, dtype=None, non_blocking: bool = False):
         return NodeBatch(
             graph=self.graph.to(device=device, dtype=dtype, non_blocking=non_blocking),
-            seed_index=self.seed_index.to(device=device, non_blocking=non_blocking),
+            seed_index=_transfer_tensor(
+                self.seed_index,
+                device=device,
+                dtype=dtype,
+                non_blocking=non_blocking,
+            ),
             metadata=self.metadata,
         )
 
@@ -528,22 +555,52 @@ class LinkPredictionBatch:
     def to(self, device=None, dtype=None, non_blocking: bool = False):
         return LinkPredictionBatch(
             graph=self.graph.to(device=device, dtype=dtype, non_blocking=non_blocking),
-            src_index=self.src_index.to(device=device, non_blocking=non_blocking),
-            dst_index=self.dst_index.to(device=device, non_blocking=non_blocking),
-            labels=self.labels.to(device=device, non_blocking=non_blocking),
+            src_index=_transfer_tensor(
+                self.src_index,
+                device=device,
+                dtype=dtype,
+                non_blocking=non_blocking,
+            ),
+            dst_index=_transfer_tensor(
+                self.dst_index,
+                device=device,
+                dtype=dtype,
+                non_blocking=non_blocking,
+            ),
+            labels=_transfer_tensor(
+                self.labels,
+                device=device,
+                dtype=dtype,
+                non_blocking=non_blocking,
+            ),
             edge_types=self.edge_types,
             edge_type_index=None
             if self.edge_type_index is None
-            else self.edge_type_index.to(device=device, non_blocking=non_blocking),
+            else _transfer_tensor(
+                self.edge_type_index,
+                device=device,
+                dtype=dtype,
+                non_blocking=non_blocking,
+            ),
             edge_type=self.edge_type,
             src_node_type=self.src_node_type,
             dst_node_type=self.dst_node_type,
             query_index=None
             if self.query_index is None
-            else self.query_index.to(device=device, non_blocking=non_blocking),
+            else _transfer_tensor(
+                self.query_index,
+                device=device,
+                dtype=dtype,
+                non_blocking=non_blocking,
+            ),
             filter_mask=None
             if self.filter_mask is None
-            else self.filter_mask.to(device=device, non_blocking=non_blocking),
+            else _transfer_tensor(
+                self.filter_mask,
+                device=device,
+                dtype=dtype,
+                non_blocking=non_blocking,
+            ),
             metadata=self.metadata,
         )
 
@@ -624,13 +681,38 @@ class TemporalEventBatch:
     def to(self, device=None, dtype=None, non_blocking: bool = False):
         return TemporalEventBatch(
             graph=self.graph.to(device=device, dtype=dtype, non_blocking=non_blocking),
-            src_index=self.src_index.to(device=device, non_blocking=non_blocking),
-            dst_index=self.dst_index.to(device=device, non_blocking=non_blocking),
-            timestamp=self.timestamp.to(device=device, non_blocking=non_blocking),
-            labels=self.labels.to(device=device, non_blocking=non_blocking),
+            src_index=_transfer_tensor(
+                self.src_index,
+                device=device,
+                dtype=dtype,
+                non_blocking=non_blocking,
+            ),
+            dst_index=_transfer_tensor(
+                self.dst_index,
+                device=device,
+                dtype=dtype,
+                non_blocking=non_blocking,
+            ),
+            timestamp=_transfer_tensor(
+                self.timestamp,
+                device=device,
+                dtype=dtype,
+                non_blocking=non_blocking,
+            ),
+            labels=_transfer_tensor(
+                self.labels,
+                device=device,
+                dtype=dtype,
+                non_blocking=non_blocking,
+            ),
             event_features=None
             if self.event_features is None
-            else self.event_features.to(device=device, non_blocking=non_blocking),
+            else _transfer_tensor(
+                self.event_features,
+                device=device,
+                dtype=dtype,
+                non_blocking=non_blocking,
+            ),
             metadata=self.metadata,
         )
 
