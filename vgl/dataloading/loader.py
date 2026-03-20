@@ -4,6 +4,23 @@ import torch
 
 from vgl.dataloading.records import LinkPredictionRecord, SampleRecord, TemporalEventRecord
 from vgl.graph.batch import GraphBatch, LinkPredictionBatch, NodeBatch, TemporalEventBatch
+from vgl.graph.stores import EdgeStore, NodeStore
+
+
+def _safe_store_getattr(self, name):
+    try:
+        data = object.__getattribute__(self, "data")
+    except AttributeError as exc:
+        raise AttributeError(name) from exc
+    try:
+        return data[name]
+    except KeyError as exc:
+        raise AttributeError(name) from exc
+
+
+# Use object-level lookup to avoid recursive __getattr__ during spawn/unpickle on Windows workers.
+NodeStore.__getattr__ = _safe_store_getattr
+EdgeStore.__getattr__ = _safe_store_getattr
 
 
 class _SampledDataset:
