@@ -26,11 +26,6 @@ class IterableOnlyDataset:
         return iter(self._items)
 
 
-class IdentitySampler:
-    def sample(self, item):
-        return item
-
-
 def test_loader_returns_graph_batch_for_list_dataset():
     graphs = [
         Graph.homo(
@@ -107,13 +102,17 @@ def test_loader_rejects_persistent_workers_without_workers():
 
 
 def test_loader_supports_workers_for_map_style_dataset():
-    dataset = SequenceDataset([1, 2, 3, 4])
-    loader = Loader(dataset=dataset, sampler=IdentitySampler(), batch_size=2, num_workers=1)
-    loader._build_batch = lambda items: items
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0], [1]]),
+        x=torch.randn(2, 4),
+        y=torch.tensor([0, 1]),
+    )
+    dataset = ListDataset([graph, graph])
+    loader = Loader(dataset=dataset, sampler=FullGraphSampler(), batch_size=2, num_workers=1)
 
     batch = next(iter(loader))
 
-    assert batch == [1, 2]
+    assert batch.num_graphs == 2
 
 
 def test_loader_can_pin_built_batch_tensors():
