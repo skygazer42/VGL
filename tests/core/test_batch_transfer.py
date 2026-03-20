@@ -24,6 +24,10 @@ def _temporal_graph():
     )
 
 
+def _transfer_device():
+    return torch.device("meta")
+
+
 def test_graph_batch_to_moves_graphs_and_batch_tensors():
     graph_one = _homo_graph()
     graph_two = _homo_graph()
@@ -36,18 +40,18 @@ def test_graph_batch_to_moves_graphs_and_batch_tensors():
         metadata=metadata,
     )
 
-    moved = batch.to(device="cpu", dtype=torch.float64)
+    moved = batch.to(device=_transfer_device())
 
     assert moved is not batch
     assert moved.graphs[0] is not graph_one
     assert moved.graphs[1] is not graph_two
-    assert moved.graphs[0].x.dtype == torch.float64
-    assert moved.graphs[1].x.dtype == torch.float64
-    assert moved.graph_index.device.type == "cpu"
+    assert moved.graphs[0].x.device.type == "meta"
+    assert moved.graphs[1].x.device.type == "meta"
+    assert moved.graph_index.device.type == "meta"
     assert moved.graph_ptr is not None
-    assert moved.graph_ptr.device.type == "cpu"
+    assert moved.graph_ptr.device.type == "meta"
     assert moved.labels is not None
-    assert moved.labels.device.type == "cpu"
+    assert moved.labels.device.type == "meta"
     assert moved.labels.dtype == torch.float32
     assert moved.metadata is metadata
     assert graph_one.x.dtype == torch.float32
@@ -86,12 +90,12 @@ def test_node_batch_to_moves_graph_and_seed_index():
         metadata=metadata,
     )
 
-    moved = batch.to(device="cpu", dtype=torch.float64)
+    moved = batch.to(device=_transfer_device())
 
     assert moved is not batch
     assert moved.graph is not graph
-    assert moved.graph.x.dtype == torch.float64
-    assert moved.seed_index.device.type == "cpu"
+    assert moved.graph.x.device.type == "meta"
+    assert moved.seed_index.device.type == "meta"
     assert moved.seed_index.dtype == torch.long
     assert moved.metadata is metadata
     assert graph.x.dtype == torch.float32
@@ -126,19 +130,19 @@ def test_link_prediction_batch_to_moves_all_transfer_fields():
         metadata=metadata,
     )
 
-    moved = batch.to(device="cpu", dtype=torch.float64)
+    moved = batch.to(device=_transfer_device())
 
     assert moved is not batch
     assert moved.graph is not graph
-    assert moved.graph.x.dtype == torch.float64
-    assert moved.src_index.device.type == "cpu"
-    assert moved.dst_index.device.type == "cpu"
-    assert moved.labels.device.type == "cpu"
+    assert moved.graph.x.device.type == "meta"
+    assert moved.src_index.device.type == "meta"
+    assert moved.dst_index.device.type == "meta"
+    assert moved.labels.device.type == "meta"
     assert moved.labels.dtype == torch.float32
     assert moved.query_index is not None
-    assert moved.query_index.device.type == "cpu"
+    assert moved.query_index.device.type == "meta"
     assert moved.filter_mask is not None
-    assert moved.filter_mask.device.type == "cpu"
+    assert moved.filter_mask.device.type == "meta"
     assert moved.metadata is metadata
     assert graph.x.dtype == torch.float32
 
@@ -182,19 +186,19 @@ def test_temporal_event_batch_to_moves_all_transfer_fields():
         metadata=metadata,
     )
 
-    moved = batch.to(device="cpu", dtype=torch.float64)
+    moved = batch.to(device=_transfer_device())
 
     assert moved is not batch
     assert moved.graph is not graph
-    assert moved.graph.nodes["node"].x.dtype == torch.float64
-    assert moved.src_index.device.type == "cpu"
-    assert moved.dst_index.device.type == "cpu"
-    assert moved.timestamp.device.type == "cpu"
+    assert moved.graph.nodes["node"].x.device.type == "meta"
+    assert moved.src_index.device.type == "meta"
+    assert moved.dst_index.device.type == "meta"
+    assert moved.timestamp.device.type == "meta"
     assert moved.timestamp.dtype == torch.float32
-    assert moved.labels.device.type == "cpu"
+    assert moved.labels.device.type == "meta"
     assert moved.labels.dtype == torch.float32
     assert moved.event_features is not None
-    assert moved.event_features.device.type == "cpu"
+    assert moved.event_features.device.type == "meta"
     assert moved.event_features.dtype == torch.float32
     assert moved.metadata is metadata
     assert graph.nodes["node"].x.dtype == torch.float32
