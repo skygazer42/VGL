@@ -73,6 +73,13 @@ def _node_count(store):
     return 0
 
 
+def _transfer_tensor(tensor: torch.Tensor, *, device=None, dtype=None, non_blocking: bool = False) -> torch.Tensor:
+    can_cast = dtype is not None and (tensor.is_floating_point() or tensor.is_complex())
+    if can_cast:
+        return tensor.to(device=device, dtype=dtype, non_blocking=non_blocking)
+    return tensor.to(device=device, non_blocking=non_blocking)
+
+
 def _require_int(value: SupportsInt | None, *, field_name: str) -> int:
     if value is None:
         raise ValueError(f"{field_name} must not be None")
@@ -295,6 +302,46 @@ class GraphBatch:
     def num_graphs(self) -> int:
         return len(self.graphs)
 
+    def to(self, device=None, dtype=None, non_blocking: bool = False):
+        return GraphBatch(
+            graphs=[
+                graph.to(device=device, dtype=dtype, non_blocking=non_blocking)
+                for graph in self.graphs
+            ],
+            graph_index=_transfer_tensor(
+                self.graph_index,
+                device=device,
+                dtype=dtype,
+                non_blocking=non_blocking,
+            ),
+            graph_ptr=None
+            if self.graph_ptr is None
+            else _transfer_tensor(
+                self.graph_ptr,
+                device=device,
+                dtype=dtype,
+                non_blocking=non_blocking,
+            ),
+            labels=None
+            if self.labels is None
+            else _transfer_tensor(
+                self.labels,
+                device=device,
+                dtype=dtype,
+                non_blocking=non_blocking,
+            ),
+            metadata=self.metadata,
+        )
+
+    def pin_memory(self):
+        return GraphBatch(
+            graphs=[graph.pin_memory() for graph in self.graphs],
+            graph_index=self.graph_index.pin_memory(),
+            graph_ptr=None if self.graph_ptr is None else self.graph_ptr.pin_memory(),
+            labels=None if self.labels is None else self.labels.pin_memory(),
+            metadata=self.metadata,
+        )
+
 
 @dataclass(slots=True)
 class NodeBatch:
@@ -343,6 +390,25 @@ class NodeBatch:
             graph=graph,
             seed_index=torch.tensor(seed_values, dtype=torch.long),
             metadata=[sample.metadata for sample in samples],
+        )
+
+    def to(self, device=None, dtype=None, non_blocking: bool = False):
+        return NodeBatch(
+            graph=self.graph.to(device=device, dtype=dtype, non_blocking=non_blocking),
+            seed_index=_transfer_tensor(
+                self.seed_index,
+                device=device,
+                dtype=dtype,
+                non_blocking=non_blocking,
+            ),
+            metadata=self.metadata,
+        )
+
+    def pin_memory(self):
+        return NodeBatch(
+            graph=self.graph.pin_memory(),
+            seed_index=self.seed_index.pin_memory(),
+            metadata=self.metadata,
         )
 
 
@@ -486,6 +552,74 @@ class LinkPredictionBatch:
             metadata=[record.metadata for record in records],
         )
 
+    def to(self, device=None, dtype=None, non_blocking: bool = False):
+        return LinkPredictionBatch(
+            graph=self.graph.to(device=device, dtype=dtype, non_blocking=non_blocking),
+            src_index=_transfer_tensor(
+                self.src_index,
+                device=device,
+                dtype=dtype,
+                non_blocking=non_blocking,
+            ),
+            dst_index=_transfer_tensor(
+                self.dst_index,
+                device=device,
+                dtype=dtype,
+                non_blocking=non_blocking,
+            ),
+            labels=_transfer_tensor(
+                self.labels,
+                device=device,
+                dtype=dtype,
+                non_blocking=non_blocking,
+            ),
+            edge_types=self.edge_types,
+            edge_type_index=None
+            if self.edge_type_index is None
+            else _transfer_tensor(
+                self.edge_type_index,
+                device=device,
+                dtype=dtype,
+                non_blocking=non_blocking,
+            ),
+            edge_type=self.edge_type,
+            src_node_type=self.src_node_type,
+            dst_node_type=self.dst_node_type,
+            query_index=None
+            if self.query_index is None
+            else _transfer_tensor(
+                self.query_index,
+                device=device,
+                dtype=dtype,
+                non_blocking=non_blocking,
+            ),
+            filter_mask=None
+            if self.filter_mask is None
+            else _transfer_tensor(
+                self.filter_mask,
+                device=device,
+                dtype=dtype,
+                non_blocking=non_blocking,
+            ),
+            metadata=self.metadata,
+        )
+
+    def pin_memory(self):
+        return LinkPredictionBatch(
+            graph=self.graph.pin_memory(),
+            src_index=self.src_index.pin_memory(),
+            dst_index=self.dst_index.pin_memory(),
+            labels=self.labels.pin_memory(),
+            edge_types=self.edge_types,
+            edge_type_index=None if self.edge_type_index is None else self.edge_type_index.pin_memory(),
+            edge_type=self.edge_type,
+            src_node_type=self.src_node_type,
+            dst_node_type=self.dst_node_type,
+            query_index=None if self.query_index is None else self.query_index.pin_memory(),
+            filter_mask=None if self.filter_mask is None else self.filter_mask.pin_memory(),
+            metadata=self.metadata,
+        )
+
 
 @dataclass(slots=True)
 class TemporalEventBatch:
@@ -543,3 +677,52 @@ class TemporalEventBatch:
 
     def history_graph(self, index: int):
         return self.graph.snapshot(self.timestamp[index].item())
+
+    def to(self, device=None, dtype=None, non_blocking: bool = False):
+        return TemporalEventBatch(
+            graph=self.graph.to(device=device, dtype=dtype, non_blocking=non_blocking),
+            src_index=_transfer_tensor(
+                self.src_index,
+                device=device,
+                dtype=dtype,
+                non_blocking=non_blocking,
+            ),
+            dst_index=_transfer_tensor(
+                self.dst_index,
+                device=device,
+                dtype=dtype,
+                non_blocking=non_blocking,
+            ),
+            timestamp=_transfer_tensor(
+                self.timestamp,
+                device=device,
+                dtype=dtype,
+                non_blocking=non_blocking,
+            ),
+            labels=_transfer_tensor(
+                self.labels,
+                device=device,
+                dtype=dtype,
+                non_blocking=non_blocking,
+            ),
+            event_features=None
+            if self.event_features is None
+            else _transfer_tensor(
+                self.event_features,
+                device=device,
+                dtype=dtype,
+                non_blocking=non_blocking,
+            ),
+            metadata=self.metadata,
+        )
+
+    def pin_memory(self):
+        return TemporalEventBatch(
+            graph=self.graph.pin_memory(),
+            src_index=self.src_index.pin_memory(),
+            dst_index=self.dst_index.pin_memory(),
+            timestamp=self.timestamp.pin_memory(),
+            labels=self.labels.pin_memory(),
+            event_features=None if self.event_features is None else self.event_features.pin_memory(),
+            metadata=self.metadata,
+        )
