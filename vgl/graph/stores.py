@@ -4,12 +4,21 @@ import torch
 
 
 def _transfer_data(data: dict, *, device=None, dtype=None, non_blocking: bool = False) -> dict:
-    return {
-        key: value.to(device=device, dtype=dtype, non_blocking=non_blocking)
-        if isinstance(value, torch.Tensor)
-        else value
-        for key, value in data.items()
-    }
+    transferred = {}
+    for key, value in data.items():
+        if not isinstance(value, torch.Tensor):
+            transferred[key] = value
+            continue
+        can_cast = dtype is not None and (value.is_floating_point() or value.is_complex())
+        if can_cast:
+            transferred[key] = value.to(
+                device=device,
+                dtype=dtype,
+                non_blocking=non_blocking,
+            )
+        else:
+            transferred[key] = value.to(device=device, non_blocking=non_blocking)
+    return transferred
 
 
 def _pin_data(data: dict) -> dict:
