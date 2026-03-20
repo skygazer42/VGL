@@ -8,16 +8,19 @@ def test_node_store_to_moves_tensors_and_preserves_non_tensors():
     x = torch.randn(3, 4)
     labels = ["a", "b", "c"]
     store = NodeStore(type_name="node", data={"x": x, "labels": labels})
+    original_dtype = store.x.dtype
 
-    moved = store.to(device="cpu")
+    moved = store.to(device="cpu", dtype=torch.float64)
 
     assert moved is not store
     assert moved.type_name == store.type_name
     assert moved.data is not store.data
     assert moved.x.device.type == "cpu"
+    assert moved.x.dtype == torch.float64
     assert torch.equal(moved.x, x)
+    assert moved.x.data_ptr() != store.x.data_ptr()
     assert moved.data["labels"] is labels
-    assert store.x.data_ptr() == x.data_ptr()
+    assert store.x.dtype == original_dtype
 
 
 def test_edge_store_pin_memory_pins_tensors_and_preserves_non_tensors():
@@ -67,8 +70,11 @@ def test_graph_to_moves_tensors_for_homo_hetero_and_temporal_graphs():
     )
 
     homo_edge_dtype = homo.edata["edge_weight"].dtype
+    homo_node_dtype = homo.x.dtype
     hetero_edge_dtype = hetero.edges[("user", "follows", "user")].edge_attr.dtype
+    hetero_node_dtype = hetero.nodes["user"].x.dtype
     temporal_edge_dtype = temporal.edges[("node", "to", "node")].timestamp.dtype
+    temporal_node_dtype = temporal.nodes["node"].x.dtype
 
     moved_homo = homo.to(device="cpu", dtype=torch.float64)
     moved_hetero = hetero.to(device="cpu", dtype=torch.float64)
@@ -77,6 +83,10 @@ def test_graph_to_moves_tensors_for_homo_hetero_and_temporal_graphs():
     assert moved_homo is not homo
     assert moved_homo.schema == homo.schema
     assert moved_homo.x.device.type == "cpu"
+    assert moved_homo.nodes["node"] is not homo.nodes["node"]
+    assert moved_homo.x.dtype == torch.float64
+    assert moved_homo.x.data_ptr() != homo.x.data_ptr()
+    assert homo.x.dtype == homo_node_dtype
     assert moved_homo.edges[("node", "to", "node")] is not homo.edges[("node", "to", "node")]
     assert moved_homo.edata["edge_weight"].dtype == torch.float64
     assert moved_homo.edata["edge_weight"].data_ptr() != homo.edata["edge_weight"].data_ptr()
@@ -86,6 +96,10 @@ def test_graph_to_moves_tensors_for_homo_hetero_and_temporal_graphs():
     assert moved_hetero is not hetero
     assert moved_hetero.schema == hetero.schema
     assert moved_hetero.nodes["user"].x.device.type == "cpu"
+    assert moved_hetero.nodes["user"] is not hetero.nodes["user"]
+    assert moved_hetero.nodes["user"].x.dtype == torch.float64
+    assert moved_hetero.nodes["user"].x.data_ptr() != hetero.nodes["user"].x.data_ptr()
+    assert hetero.nodes["user"].x.dtype == hetero_node_dtype
     assert moved_hetero.edges[("user", "follows", "user")] is not hetero.edges[("user", "follows", "user")]
     assert moved_hetero.edges[("user", "follows", "user")].edge_attr.dtype == torch.float64
     assert (
@@ -102,6 +116,10 @@ def test_graph_to_moves_tensors_for_homo_hetero_and_temporal_graphs():
     assert moved_temporal.schema == temporal.schema
     assert moved_temporal.schema.time_attr == "timestamp"
     assert moved_temporal.nodes["node"].x.device.type == "cpu"
+    assert moved_temporal.nodes["node"] is not temporal.nodes["node"]
+    assert moved_temporal.nodes["node"].x.dtype == torch.float64
+    assert moved_temporal.nodes["node"].x.data_ptr() != temporal.nodes["node"].x.data_ptr()
+    assert temporal.nodes["node"].x.dtype == temporal_node_dtype
     assert moved_temporal.edges[("node", "to", "node")] is not temporal.edges[("node", "to", "node")]
     assert moved_temporal.edges[("node", "to", "node")].timestamp.dtype == torch.float64
     assert (
