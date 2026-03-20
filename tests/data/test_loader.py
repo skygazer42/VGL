@@ -115,6 +115,32 @@ def test_loader_supports_workers_for_map_style_dataset():
     assert batch.num_graphs == 2
 
 
+def test_loader_reuses_internal_worker_loader_with_persistent_workers():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0], [1]]),
+        x=torch.randn(2, 4),
+        y=torch.tensor([0, 1]),
+    )
+    dataset = ListDataset([graph, graph])
+    loader = Loader(
+        dataset=dataset,
+        sampler=FullGraphSampler(),
+        batch_size=2,
+        num_workers=1,
+        persistent_workers=True,
+    )
+
+    first_batch = next(iter(loader))
+    first_worker_loader = loader._worker_loader
+
+    second_batch = next(iter(loader))
+    second_worker_loader = loader._worker_loader
+
+    assert first_batch.num_graphs == 2
+    assert second_batch.num_graphs == 2
+    assert first_worker_loader is second_worker_loader
+
+
 def test_loader_can_pin_built_batch_tensors():
     graph = Graph.homo(
         edge_index=torch.tensor([[0], [1]]),

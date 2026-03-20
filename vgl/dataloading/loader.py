@@ -4,23 +4,6 @@ import torch
 
 from vgl.dataloading.records import LinkPredictionRecord, SampleRecord, TemporalEventRecord
 from vgl.graph.batch import GraphBatch, LinkPredictionBatch, NodeBatch, TemporalEventBatch
-from vgl.graph.stores import EdgeStore, NodeStore
-
-
-def _safe_store_getattr(self, name):
-    try:
-        data = object.__getattribute__(self, "data")
-    except AttributeError as exc:
-        raise AttributeError(name) from exc
-    try:
-        return data[name]
-    except KeyError as exc:
-        raise AttributeError(name) from exc
-
-
-# Use object-level lookup to avoid recursive __getattr__ during spawn/unpickle on Windows workers.
-NodeStore.__getattr__ = _safe_store_getattr
-EdgeStore.__getattr__ = _safe_store_getattr
 
 
 class _SampledDataset:
@@ -61,6 +44,7 @@ class Loader:
         self.pin_memory = pin_memory
         self.prefetch_factor = prefetch_factor
         self.persistent_workers = persistent_workers
+        self._worker_loader = None
 
         if self.prefetch_factor is not None and self.num_workers <= 0:
             raise ValueError("prefetch_factor requires num_workers > 0")
@@ -128,18 +112,28 @@ class Loader:
             return batch.pin_memory()
         return self._pin_memory_value(batch)
 
+    def _make_worker_loader(self):
+        return torch.utils.data.DataLoader(
+            _SampledDataset(self.dataset, self.sampler),
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=self.num_workers,
+            pin_memory=False,
+            prefetch_factor=self.prefetch_factor,
+            persistent_workers=self.persistent_workers,
+            collate_fn=_identity_collate,
+        )
+
+    def _get_worker_loader(self):
+        if self.persistent_workers:
+            if self._worker_loader is None:
+                self._worker_loader = self._make_worker_loader()
+            return self._worker_loader
+        return self._make_worker_loader()
+
     def __iter__(self):
         if self.num_workers > 0:
-            worker_loader = torch.utils.data.DataLoader(
-                _SampledDataset(self.dataset, self.sampler),
-                batch_size=self.batch_size,
-                shuffle=False,
-                num_workers=self.num_workers,
-                pin_memory=False,
-                prefetch_factor=self.prefetch_factor,
-                persistent_workers=self.persistent_workers,
-                collate_fn=_identity_collate,
-            )
+            worker_loader = self._get_worker_loader()
             for sampled_batch in worker_loader:
                 batch_items = []
                 for sampled in sampled_batch:

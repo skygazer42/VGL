@@ -10,8 +10,11 @@ class NodeStore:
 
     def __getattr__(self, name: str) -> torch.Tensor:
         try:
-            return self.data[name]
+            data = object.__getattribute__(self, "data")
+            return data[name]
         except KeyError as exc:
+            raise AttributeError(name) from exc
+        except AttributeError as exc:
             raise AttributeError(name) from exc
 
 
@@ -22,6 +25,9 @@ class EdgeStore:
 
     def __getattr__(self, name: str) -> torch.Tensor:
         try:
-            return self.data[name]
+            data = object.__getattribute__(self, "data")
+            return data[name]
         except KeyError as exc:
+            raise AttributeError(name) from exc
+        except AttributeError as exc:
             raise AttributeError(name) from exc
