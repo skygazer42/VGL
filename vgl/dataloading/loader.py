@@ -1,14 +1,30 @@
-from vgl.dataloading.records import LinkPredictionRecord, SampleRecord, TemporalEventRecord
-from vgl.graph.batch import GraphBatch, LinkPredictionBatch, NodeBatch, TemporalEventBatch
+from collections import deque
+
+from vgl.dataloading.executor import PlanExecutor
+from vgl.dataloading.materialize import materialize_batch, materialize_context
+from vgl.dataloading.plan import SamplingPlan
 
 
 class Loader:
-    def __init__(self, dataset, sampler, batch_size, label_source=None, label_key=None):
+    def __init__(
+        self,
+        dataset,
+        sampler,
+        batch_size,
+        label_source=None,
+        label_key=None,
+        executor=None,
+        prefetch=0,
+    ):
         self.dataset = dataset
         self.sampler = sampler
         self.batch_size = batch_size
         self.label_source = label_source
         self.label_key = label_key
+        self.executor = PlanExecutor() if executor is None else executor
+        self.prefetch = int(prefetch)
+        if self.prefetch < 0:
+            raise ValueError("prefetch must be >= 0")
 
     def _dataset_iter(self):
         try:
@@ -18,37 +34,60 @@ class Loader:
                 return (self.dataset[index] for index in range(len(self.dataset)))
             raise TypeError("Loader dataset must be iterable or implement __len__ and __getitem__")
 
+    def _resolve_sampled(self, sampled):
+        if isinstance(sampled, SamplingPlan):
+            context = self.executor.execute(sampled, graph=sampled.graph)
+            return materialize_context(context)
+        if isinstance(sampled, (list, tuple)):
+            resolved = []
+            for value in sampled:
+                current = self._resolve_sampled(value)
+                if isinstance(current, list):
+                    resolved.extend(current)
+                elif isinstance(current, tuple):
+                    resolved.extend(list(current))
+                else:
+                    resolved.append(current)
+            return resolved if isinstance(sampled, list) else tuple(resolved)
+        return sampled
+
+    def _sample_item(self, item):
+        build_plan = getattr(self.sampler, "build_plan", None)
+        if callable(build_plan):
+            sampled = build_plan(item)
+        else:
+            sampled = self.sampler.sample(item)
+        return self._resolve_sampled(sampled)
+
     def _build_batch(self, items):
-        if items and isinstance(items[0], TemporalEventRecord):
-            return TemporalEventBatch.from_records(items)
-        if items and isinstance(items[0], LinkPredictionRecord):
-            return LinkPredictionBatch.from_records(items)
-        if items and isinstance(items[0], SampleRecord) and items[0].subgraph_seed is not None and self.label_source is None:
-            return NodeBatch.from_samples(items)
-        if items and hasattr(items[0], "graph") and self.label_source is not None and self.label_key is not None:
-            return GraphBatch.from_samples(
-                items,
-                label_key=self.label_key,
-                label_source=self.label_source,
-            )
-        return GraphBatch.from_graphs(items)
+        return materialize_batch(items, label_source=self.label_source, label_key=self.label_key)
+
+    @staticmethod
+    def _append_sampled(batch, sampled):
+        if isinstance(sampled, (list, tuple)):
+            batch.extend(sampled)
+        else:
+            batch.append(sampled)
 
     def __iter__(self):
-        batch = []
-        seed_count = 0
-        for item in self._dataset_iter():
-            sampled = self.sampler.sample(item)
-            if isinstance(sampled, (list, tuple)):
-                batch.extend(sampled)
-            else:
-                batch.append(sampled)
-            seed_count += 1
-            if seed_count == self.batch_size:
-                yield self._build_batch(batch)
-                batch = []
-                seed_count = 0
-        if batch:
+        dataset_iter = self._dataset_iter()
+        pending = deque()
+
+        def fill_pending(limit):
+            while len(pending) < limit:
+                try:
+                    item = next(dataset_iter)
+                except StopIteration:
+                    break
+                pending.append(self._sample_item(item))
+
+        fill_pending(self.batch_size + self.prefetch)
+        while pending:
+            batch = []
+            for _ in range(min(self.batch_size, len(pending))):
+                self._append_sampled(batch, pending.popleft())
             yield self._build_batch(batch)
+            fill_pending(self.batch_size + self.prefetch)
 
 
 DataLoader = Loader
