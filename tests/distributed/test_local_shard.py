@@ -87,3 +87,40 @@ def test_local_graph_shard_reconstructs_multi_relation_partition_graph(tmp_path)
     assert torch.equal(shard.graph.edges[likes].score, torch.tensor([0.7]))
     assert torch.equal(shard.global_edge_index(edge_type=follows), torch.tensor([[2, 3], [3, 2]]))
     assert torch.equal(shard.global_edge_index(edge_type=likes), torch.tensor([[3], [2]]))
+
+
+def test_local_graph_shard_reconstructs_heterogeneous_partition_graph(tmp_path):
+    writes = ("author", "writes", "paper")
+    cites = ("paper", "cites", "paper")
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.arange(8, dtype=torch.float32).view(4, 2)},
+            "paper": {"x": torch.arange(10, 18, dtype=torch.float32).view(4, 2)},
+        },
+        edges={
+            writes: {
+                "edge_index": torch.tensor([[0, 1, 2, 3, 0], [1, 0, 3, 2, 2]]),
+                "weight": torch.tensor([1.0, 2.0, 3.0, 4.0, 9.0]),
+            },
+            cites: {
+                "edge_index": torch.tensor([[0, 1, 2, 3, 1], [1, 0, 3, 2, 2]]),
+                "score": torch.tensor([0.1, 0.2, 0.3, 0.4, 0.9]),
+            },
+        },
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+
+    shard = LocalGraphShard.from_partition_dir(tmp_path, partition_id=1)
+
+    assert set(shard.graph.nodes) == {"author", "paper"}
+    assert set(shard.graph.edges) == {writes, cites}
+    assert torch.equal(shard.node_ids_for("author"), torch.tensor([2, 3]))
+    assert torch.equal(shard.node_ids_for("paper"), torch.tensor([2, 3]))
+    assert torch.equal(shard.global_to_local(torch.tensor([2, 3]), node_type="author"), torch.tensor([0, 1]))
+    assert torch.equal(shard.local_to_global(torch.tensor([0, 1]), node_type="paper"), torch.tensor([2, 3]))
+    assert torch.equal(shard.graph.nodes["paper"].x, torch.tensor([[14.0, 15.0], [16.0, 17.0]]))
+    assert torch.equal(shard.graph.edges[writes].edge_index, torch.tensor([[0, 1], [1, 0]]))
+    assert torch.equal(shard.graph.edges[writes].weight, torch.tensor([3.0, 4.0]))
+    assert torch.equal(shard.graph.edges[cites].score, torch.tensor([0.3, 0.4]))
+    assert torch.equal(shard.global_edge_index(edge_type=writes), torch.tensor([[2, 3], [3, 2]]))
+    assert torch.equal(shard.global_edge_index(edge_type=cites), torch.tensor([[2, 3], [3, 2]]))

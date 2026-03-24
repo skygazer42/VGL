@@ -7,6 +7,7 @@ from vgl.distributed.writer import write_partitioned_graph
 
 
 NODE_KEY = ("node", "node", "x")
+PAPER_KEY = ("node", "paper", "x")
 
 
 def test_local_sampling_coordinator_routes_seeds_and_fetches_features(tmp_path):
@@ -91,5 +92,53 @@ def test_local_sampling_coordinator_exposes_multi_relation_partition_queries(tmp
 
     assert torch.equal(local_follows, torch.tensor([[0, 1], [1, 0]]))
     assert torch.equal(global_likes, torch.tensor([[3], [2]]))
+    assert adjacency.layout.value == "csc"
+    assert adjacency.shape == (2, 2)
+
+
+def test_local_sampling_coordinator_routes_typed_node_ids_and_features(tmp_path):
+    writes = ("author", "writes", "paper")
+    cites = ("paper", "cites", "paper")
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.arange(8, dtype=torch.float32).view(4, 2)},
+            "paper": {"x": torch.arange(10, 18, dtype=torch.float32).view(4, 2)},
+        },
+        edges={
+            writes: {
+                "edge_index": torch.tensor([[0, 1, 2, 3, 0], [1, 0, 3, 2, 2]]),
+                "weight": torch.tensor([1.0, 2.0, 3.0, 4.0, 9.0]),
+            },
+            cites: {
+                "edge_index": torch.tensor([[0, 1, 2, 3, 1], [1, 0, 3, 2, 2]]),
+                "score": torch.tensor([0.1, 0.2, 0.3, 0.4, 0.9]),
+            },
+        },
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    coordinator = LocalSamplingCoordinator(shards)
+    paper_ids = torch.tensor([3, 0, 2])
+
+    routes = coordinator.route_node_ids(paper_ids, node_type="paper")
+    fetched = coordinator.fetch_node_features(PAPER_KEY, paper_ids)
+    partition_papers = coordinator.partition_node_ids(1, node_type="paper")
+    global_writes = coordinator.fetch_partition_edge_index(1, edge_type=writes, global_ids=True)
+    adjacency = coordinator.fetch_partition_adjacency(1, edge_type=writes, layout="csc")
+
+    assert len(routes) == 2
+    assert routes[0].partition_id == 0
+    assert torch.equal(routes[0].global_ids, torch.tensor([0]))
+    assert torch.equal(routes[0].local_ids, torch.tensor([0]))
+    assert routes[1].partition_id == 1
+    assert torch.equal(routes[1].global_ids, torch.tensor([3, 2]))
+    assert torch.equal(routes[1].local_ids, torch.tensor([1, 0]))
+    assert torch.equal(fetched.index, paper_ids)
+    assert torch.equal(fetched.values, torch.tensor([[16.0, 17.0], [10.0, 11.0], [14.0, 15.0]]))
+    assert torch.equal(partition_papers, torch.tensor([2, 3]))
+    assert torch.equal(global_writes, torch.tensor([[2, 3], [3, 2]]))
     assert adjacency.layout.value == "csc"
     assert adjacency.shape == (2, 2)

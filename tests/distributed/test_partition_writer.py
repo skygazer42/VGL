@@ -94,3 +94,53 @@ def test_partition_writer_preserves_multi_relation_graph_payloads(tmp_path):
     assert torch.equal(part1_graph.edges[follows].weight, torch.tensor([3.0, 4.0]))
     assert torch.equal(part1_graph.edges[likes].edge_index, torch.tensor([[1], [0]]))
     assert torch.equal(part1_graph.edges[likes].score, torch.tensor([0.7]))
+
+
+def test_partition_writer_preserves_heterogeneous_partition_payloads(tmp_path):
+    writes = ("author", "writes", "paper")
+    cites = ("paper", "cites", "paper")
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.arange(8, dtype=torch.float32).view(4, 2)},
+            "paper": {"x": torch.arange(10, 18, dtype=torch.float32).view(4, 2)},
+        },
+        edges={
+            writes: {
+                "edge_index": torch.tensor([[0, 1, 2, 3, 0], [1, 0, 3, 2, 2]]),
+                "weight": torch.tensor([1.0, 2.0, 3.0, 4.0, 9.0]),
+            },
+            cites: {
+                "edge_index": torch.tensor([[0, 1, 2, 3, 1], [1, 0, 3, 2, 2]]),
+                "score": torch.tensor([0.1, 0.2, 0.3, 0.4, 0.9]),
+            },
+        },
+    )
+
+    manifest = write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    loaded = load_partition_manifest(tmp_path / "manifest.json")
+    part0 = torch.load(tmp_path / "part-0.pt", weights_only=True)
+    part1 = torch.load(tmp_path / "part-1.pt", weights_only=True)
+
+    assert manifest.num_nodes_by_type == {"author": 4, "paper": 4}
+    assert loaded.owner(3, node_type="author").partition_id == 1
+    assert loaded.owner(3, node_type="paper").partition_id == 1
+    assert torch.equal(part0["node_ids"]["author"], torch.tensor([0, 1]))
+    assert torch.equal(part0["node_ids"]["paper"], torch.tensor([0, 1]))
+    assert torch.equal(part1["node_ids"]["author"], torch.tensor([2, 3]))
+    assert torch.equal(part1["node_ids"]["paper"], torch.tensor([2, 3]))
+
+    part0_graph = deserialize_graph(part0["graph"])
+    part1_graph = deserialize_graph(part1["graph"])
+
+    assert set(part0_graph.nodes) == {"author", "paper"}
+    assert set(part0_graph.edges) == {writes, cites}
+    assert torch.equal(part0_graph.nodes["author"].x, torch.tensor([[0.0, 1.0], [2.0, 3.0]]))
+    assert torch.equal(part1_graph.nodes["paper"].x, torch.tensor([[14.0, 15.0], [16.0, 17.0]]))
+    assert torch.equal(part0_graph.edges[writes].edge_index, torch.tensor([[0, 1], [1, 0]]))
+    assert torch.equal(part0_graph.edges[writes].weight, torch.tensor([1.0, 2.0]))
+    assert torch.equal(part1_graph.edges[writes].edge_index, torch.tensor([[0, 1], [1, 0]]))
+    assert torch.equal(part1_graph.edges[writes].weight, torch.tensor([3.0, 4.0]))
+    assert torch.equal(part0_graph.edges[cites].edge_index, torch.tensor([[0, 1], [1, 0]]))
+    assert torch.equal(part0_graph.edges[cites].score, torch.tensor([0.1, 0.2]))
+    assert torch.equal(part1_graph.edges[cites].edge_index, torch.tensor([[0, 1], [1, 0]]))
+    assert torch.equal(part1_graph.edges[cites].score, torch.tensor([0.3, 0.4]))

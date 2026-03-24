@@ -10,23 +10,37 @@ from vgl.graph.schema import GraphSchema
 from vgl.storage import FeatureStore, InMemoryGraphStore, InMemoryTensorStore
 
 
-DEFAULT_EDGE_TYPE = ("node", "to", "node")
-
-
 @dataclass(slots=True)
 class LocalGraphShard:
     manifest: PartitionManifest
     partition: PartitionShard
     root: Path
-    node_ids: torch.Tensor
+    node_ids_by_type: dict[str, torch.Tensor]
     feature_store: FeatureStore
     graph_store: InMemoryGraphStore
     graph: Graph
-    _global_to_local: dict[int, int] = field(default_factory=dict, repr=False)
+    _global_to_local_by_type: dict[str, dict[int, int]] = field(default_factory=dict, repr=False)
 
     def __post_init__(self) -> None:
         self.root = Path(self.root)
-        self._global_to_local = {int(node_id): index for index, node_id in enumerate(self.node_ids.tolist())}
+        self._global_to_local_by_type = {
+            node_type: {int(node_id): index for index, node_id in enumerate(node_ids.tolist())}
+            for node_type, node_ids in self.node_ids_by_type.items()
+        }
+
+    @property
+    def node_ids(self) -> torch.Tensor:
+        if set(self.node_ids_by_type) == {"node"}:
+            return self.node_ids_by_type["node"]
+        if "node" in self.node_ids_by_type:
+            return self.node_ids_by_type["node"]
+        raise AttributeError("node_ids is ambiguous for multi-type shards; use node_ids_for(node_type)")
+
+    def node_ids_for(self, node_type: str = "node") -> torch.Tensor:
+        try:
+            return self.node_ids_by_type[str(node_type)]
+        except KeyError as exc:
+            raise KeyError(node_type) from exc
 
     @classmethod
     def from_partition_dir(cls, root, *, partition_id: int) -> "LocalGraphShard":
@@ -42,11 +56,8 @@ class LocalGraphShard:
             raise ValueError(f"partition {partition_id} does not declare a payload path")
 
         payload = torch.load(root / partition.path, weights_only=True)
-        graph_payload = payload["graph"]
-        graph = deserialize_graph(graph_payload)
-        if set(graph.nodes) != {"node"}:
-            raise ValueError("LocalGraphShard currently supports single-node-type partitions only")
-        node_data = dict(graph.nodes["node"].data)
+        graph = deserialize_graph(payload["graph"])
+        node_data_by_type = {node_type: dict(store.data) for node_type, store in graph.nodes.items()}
         edge_types = tuple(graph.edges)
         edge_feature_data = {
             edge_type: {
@@ -56,16 +67,32 @@ class LocalGraphShard:
             }
             for edge_type, edge_store in graph.edges.items()
         }
-        node_ids = payload.get("node_ids", node_data.get("n_id"))
-        if node_ids is None:
-            start, end = partition.node_range
-            node_ids = torch.arange(start, end, dtype=torch.long)
-        node_ids = torch.as_tensor(node_ids, dtype=torch.long)
+
+        raw_node_ids = payload.get("node_ids")
+        node_ids_by_type = {}
+        if isinstance(raw_node_ids, dict):
+            node_ids_by_type = {
+                str(node_type): torch.as_tensor(node_ids, dtype=torch.long)
+                for node_type, node_ids in raw_node_ids.items()
+            }
+        elif raw_node_ids is not None and len(graph.nodes) == 1:
+            only_node_type = next(iter(graph.nodes))
+            node_ids_by_type[only_node_type] = torch.as_tensor(raw_node_ids, dtype=torch.long)
+
+        for node_type, node_data in node_data_by_type.items():
+            if node_type in node_ids_by_type:
+                continue
+            node_ids = node_data.get("n_id")
+            if node_ids is None:
+                start, end = partition.node_range_for(node_type)
+                node_ids = torch.arange(start, end, dtype=torch.long)
+            node_ids_by_type[node_type] = torch.as_tensor(node_ids, dtype=torch.long)
 
         feature_store = FeatureStore(
             {
                 **{
-                    ("node", "node", name): InMemoryTensorStore(value)
+                    ("node", node_type, name): InMemoryTensorStore(value)
+                    for node_type, node_data in node_data_by_type.items()
                     for name, value in node_data.items()
                     if isinstance(value, torch.Tensor)
                 },
@@ -79,12 +106,12 @@ class LocalGraphShard:
         )
         graph_store = InMemoryGraphStore(
             edges={edge_type: graph.edges[edge_type].edge_index for edge_type in edge_types},
-            num_nodes={"node": int(node_ids.numel())},
+            num_nodes={node_type: int(node_ids.numel()) for node_type, node_ids in node_ids_by_type.items()},
         )
         schema = GraphSchema(
-            node_types=("node",),
+            node_types=graph.schema.node_types,
             edge_types=edge_types,
-            node_features={"node": tuple(node_data.keys())},
+            node_features={node_type: tuple(node_data.keys()) for node_type, node_data in node_data_by_type.items()},
             edge_features={
                 edge_type: ("edge_index",) + tuple(edge_feature_data[edge_type].keys())
                 for edge_type in edge_types
@@ -96,29 +123,49 @@ class LocalGraphShard:
             manifest=manifest,
             partition=partition,
             root=root,
-            node_ids=node_ids,
+            node_ids_by_type=node_ids_by_type,
             feature_store=feature_store,
             graph_store=graph_store,
             graph=graph,
         )
 
-    def global_to_local(self, node_ids: torch.Tensor) -> torch.Tensor:
+    def global_to_local(self, node_ids: torch.Tensor, *, node_type: str = "node") -> torch.Tensor:
+        node_type = str(node_type)
+        try:
+            index = self._global_to_local_by_type[node_type]
+        except KeyError as exc:
+            raise KeyError(node_type) from exc
         values = []
         for node_id in torch.as_tensor(node_ids, dtype=torch.long).tolist():
             try:
-                values.append(self._global_to_local[int(node_id)])
+                values.append(index[int(node_id)])
             except KeyError as exc:
-                raise KeyError(f"node {node_id} is not present in partition {self.partition.partition_id}") from exc
+                raise KeyError(
+                    f"node {node_id} is not present in partition {self.partition.partition_id} for node type {node_type!r}"
+                ) from exc
         return torch.tensor(values, dtype=torch.long)
 
-    def local_to_global(self, node_ids: torch.Tensor) -> torch.Tensor:
+    def local_to_global(self, node_ids: torch.Tensor, *, node_type: str = "node") -> torch.Tensor:
+        global_ids = self.node_ids_for(node_type)
         local_ids = torch.as_tensor(node_ids, dtype=torch.long)
-        if local_ids.numel() > 0 and ((local_ids < 0).any() or (local_ids >= self.node_ids.numel()).any()):
-            raise IndexError(f"local node ids are out of range for partition {self.partition.partition_id}")
-        return self.node_ids[local_ids]
+        if local_ids.numel() > 0 and ((local_ids < 0).any() or (local_ids >= global_ids.numel()).any()):
+            raise IndexError(
+                f"local node ids are out of range for partition {self.partition.partition_id} and node type {node_type!r}"
+            )
+        return global_ids[local_ids]
 
     def global_edge_index(self, *, edge_type=None) -> torch.Tensor:
-        return self.local_to_global(self.graph_store.edge_index(edge_type))
+        if edge_type is None:
+            edge_type = self.graph._default_edge_type()
+        edge_type = tuple(edge_type)
+        src_type, _, dst_type = edge_type
+        local_edge_index = self.graph_store.edge_index(edge_type)
+        return torch.stack(
+            (
+                self.local_to_global(local_edge_index[0], node_type=src_type),
+                self.local_to_global(local_edge_index[1], node_type=dst_type),
+            )
+        )
 
 
 __all__ = ["LocalGraphShard"]

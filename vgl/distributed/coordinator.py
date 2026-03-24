@@ -25,13 +25,13 @@ class ShardRoute:
 
 
 class SamplingCoordinator(Protocol):
-    def route_node_ids(self, node_ids: torch.Tensor) -> tuple[ShardRoute, ...]:
+    def route_node_ids(self, node_ids: torch.Tensor, *, node_type: str = "node") -> tuple[ShardRoute, ...]:
         ...
 
     def fetch_node_features(self, key: FeatureKey, node_ids: torch.Tensor) -> TensorSlice:
         ...
 
-    def partition_node_ids(self, partition_id: int) -> torch.Tensor:
+    def partition_node_ids(self, partition_id: int, *, node_type: str = "node") -> torch.Tensor:
         ...
 
     def fetch_partition_edge_index(
@@ -71,8 +71,8 @@ class LocalSamplingCoordinator:
         except KeyError as exc:
             raise KeyError(f"missing shard for partition {partition_id}") from exc
 
-    def partition_node_ids(self, partition_id: int) -> torch.Tensor:
-        return self._shard(partition_id).node_ids
+    def partition_node_ids(self, partition_id: int, *, node_type: str = "node") -> torch.Tensor:
+        return self._shard(partition_id).node_ids_for(node_type)
 
     def fetch_partition_edge_index(
         self,
@@ -95,11 +95,11 @@ class LocalSamplingCoordinator:
     ) -> SparseTensor:
         return self._shard(partition_id).graph_store.adjacency(edge_type=edge_type, layout=layout)
 
-    def route_node_ids(self, node_ids: torch.Tensor) -> tuple[ShardRoute, ...]:
+    def route_node_ids(self, node_ids: torch.Tensor, *, node_type: str = "node") -> tuple[ShardRoute, ...]:
         node_ids = torch.as_tensor(node_ids, dtype=torch.long)
         grouped: dict[int, dict[str, list[int]]] = {}
         for position, node_id in enumerate(node_ids.tolist()):
-            partition = self.manifest.owner(node_id)
+            partition = self.manifest.owner(node_id, node_type=node_type)
             shard = self.shards.get(partition.partition_id)
             if shard is None:
                 raise KeyError(f"missing shard for partition {partition.partition_id}")
@@ -109,7 +109,7 @@ class LocalSamplingCoordinator:
             )
             bucket["global_ids"].append(int(node_id))
             bucket["positions"].append(int(position))
-            bucket["local_ids"].append(int(shard.global_to_local(torch.tensor([node_id])).item()))
+            bucket["local_ids"].append(int(shard.global_to_local(torch.tensor([node_id]), node_type=node_type).item()))
 
         routes = []
         for partition_id in sorted(grouped):
@@ -125,8 +125,12 @@ class LocalSamplingCoordinator:
         return tuple(routes)
 
     def fetch_node_features(self, key: FeatureKey, node_ids: torch.Tensor) -> TensorSlice:
+        entity_kind, type_key, _ = key
+        if entity_kind != "node":
+            raise ValueError("fetch_node_features requires a node feature key")
+        node_type = str(type_key)
         node_ids = torch.as_tensor(node_ids, dtype=torch.long)
-        routes = self.route_node_ids(node_ids)
+        routes = self.route_node_ids(node_ids, node_type=node_type)
         if node_ids.numel() == 0:
             first_store = next(iter(self.feature_stores.values()))
             shape = first_store.shape(key)
