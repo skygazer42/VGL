@@ -5,6 +5,7 @@ import torch
 
 from vgl.distributed.shard import LocalGraphShard
 from vgl.distributed.store import DistributedFeatureStore, LocalFeatureStoreAdapter
+from vgl.sparse import SparseLayout, SparseTensor
 from vgl.storage.base import TensorSlice
 from vgl.storage.feature_store import FeatureKey
 
@@ -30,6 +31,20 @@ class SamplingCoordinator(Protocol):
     def fetch_node_features(self, key: FeatureKey, node_ids: torch.Tensor) -> TensorSlice:
         ...
 
+    def partition_node_ids(self, partition_id: int) -> torch.Tensor:
+        ...
+
+    def fetch_partition_edge_index(self, partition_id: int, *, global_ids: bool = False) -> torch.Tensor:
+        ...
+
+    def fetch_partition_adjacency(
+        self,
+        partition_id: int,
+        *,
+        layout: SparseLayout | str = SparseLayout.COO,
+    ) -> SparseTensor:
+        ...
+
 
 class LocalSamplingCoordinator:
     def __init__(self, shards: dict[int, LocalGraphShard]):
@@ -42,6 +57,29 @@ class LocalSamplingCoordinator:
             partition_id: LocalFeatureStoreAdapter(shard.feature_store)
             for partition_id, shard in self.shards.items()
         }
+
+    def _shard(self, partition_id: int) -> LocalGraphShard:
+        try:
+            return self.shards[int(partition_id)]
+        except KeyError as exc:
+            raise KeyError(f"missing shard for partition {partition_id}") from exc
+
+    def partition_node_ids(self, partition_id: int) -> torch.Tensor:
+        return self._shard(partition_id).node_ids
+
+    def fetch_partition_edge_index(self, partition_id: int, *, global_ids: bool = False) -> torch.Tensor:
+        shard = self._shard(partition_id)
+        if global_ids:
+            return shard.global_edge_index()
+        return shard.graph_store.edge_index()
+
+    def fetch_partition_adjacency(
+        self,
+        partition_id: int,
+        *,
+        layout: SparseLayout | str = SparseLayout.COO,
+    ) -> SparseTensor:
+        return self._shard(partition_id).graph_store.adjacency(layout=layout)
 
     def route_node_ids(self, node_ids: torch.Tensor) -> tuple[ShardRoute, ...]:
         node_ids = torch.as_tensor(node_ids, dtype=torch.long)

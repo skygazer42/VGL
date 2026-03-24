@@ -22,3 +22,16 @@ def test_local_graph_shard_loads_partition_graph_and_store_view(tmp_path):
     assert torch.equal(shard.graph.n_id, torch.tensor([2, 3]))
     assert torch.equal(shard.graph_store.edge_index(), torch.tensor([[0], [1]]))
     assert torch.equal(fetched, torch.tensor([[4.0, 5.0], [6.0, 7.0]]))
+
+
+def test_local_graph_shard_maps_local_ids_and_edges_back_to_global_space(tmp_path):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]]),
+        x=torch.arange(8, dtype=torch.float32).view(4, 2),
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+
+    shard = LocalGraphShard.from_partition_dir(tmp_path, partition_id=1)
+
+    assert torch.equal(shard.local_to_global(torch.tensor([0, 1])), torch.tensor([2, 3]))
+    assert torch.equal(shard.global_edge_index(), torch.tensor([[2], [3]]))

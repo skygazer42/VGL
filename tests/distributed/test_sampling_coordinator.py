@@ -34,3 +34,29 @@ def test_local_sampling_coordinator_routes_seeds_and_fetches_features(tmp_path):
     assert torch.equal(routes[1].local_ids, torch.tensor([1, 0]))
     assert torch.equal(fetched.index, node_ids)
     assert torch.equal(fetched.values, torch.tensor([[6.0, 7.0], [0.0, 1.0], [4.0, 5.0]]))
+
+
+def test_local_sampling_coordinator_exposes_partition_graph_queries(tmp_path):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]]),
+        x=torch.arange(8, dtype=torch.float32).view(4, 2),
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    coordinator = LocalSamplingCoordinator(shards)
+
+    partition_node_ids = coordinator.partition_node_ids(1)
+    local_edge_index = coordinator.fetch_partition_edge_index(1)
+    global_edge_index = coordinator.fetch_partition_edge_index(1, global_ids=True)
+    adjacency = coordinator.fetch_partition_adjacency(1, layout="csr")
+
+    assert torch.equal(partition_node_ids, torch.tensor([2, 3]))
+    assert torch.equal(local_edge_index, torch.tensor([[0], [1]]))
+    assert torch.equal(global_edge_index, torch.tensor([[2], [3]]))
+    assert adjacency.layout.value == "csr"
+    assert adjacency.shape == (2, 2)
+    assert torch.equal(adjacency.crow_indices, torch.tensor([0, 1, 1]))
+    assert torch.equal(adjacency.col_indices, torch.tensor([1]))

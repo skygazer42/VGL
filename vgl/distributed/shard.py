@@ -94,5 +94,14 @@ class LocalGraphShard:
                 raise KeyError(f"node {node_id} is not present in partition {self.partition.partition_id}") from exc
         return torch.tensor(values, dtype=torch.long)
 
+    def local_to_global(self, node_ids: torch.Tensor) -> torch.Tensor:
+        local_ids = torch.as_tensor(node_ids, dtype=torch.long)
+        if local_ids.numel() > 0 and ((local_ids < 0).any() or (local_ids >= self.node_ids.numel()).any()):
+            raise IndexError(f"local node ids are out of range for partition {self.partition.partition_id}")
+        return self.node_ids[local_ids]
+
+    def global_edge_index(self) -> torch.Tensor:
+        return self.local_to_global(self.graph_store.edge_index())
+
 
 __all__ = ["LocalGraphShard"]
