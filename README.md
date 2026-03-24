@@ -54,7 +54,7 @@
 | `vgl.sparse` | `SparseTensor`, COO/CSR/CSC conversion helpers, transpose/reduction utilities, sparse graph ops |
 | `vgl.storage` | tensor stores, `FeatureStore`, `GraphStore`, storage-backed graph assembly |
 | `vgl.ops` | structure transforms, homo/hetero relation-local subgraph extraction, k-hop expansion, compaction |
-| `vgl.data` | dataset catalog models, cache helpers, built-in datasets, on-disk datasets |
+| `vgl.data` | dataset catalog models, cache helpers, built-in datasets, homo/hetero/temporal on-disk datasets |
 | `vgl.dataloading` | `DataLoader`, `SamplingPlan`, plan executor, samplers, sample records |
 | `vgl.distributed` | partition metadata, local shard loading, store adapters, partition graph queries, sampling coordination |
 | `vgl.nn` | `MessagePassing`, 50+ convolution layers, graph/temporal encoders, `HeteroConv`, readout, `GroupRevRes` |
@@ -71,7 +71,7 @@
 - `vgl.sparse` is where adjacency layouts and sparse execution helpers live. It now exposes COO/CSR/CSC conversion, transpose, row/column structural selection, additive reductions, and cached adjacency views through `Graph.adjacency(...)`.
 - `vgl.storage` turns tensor stores plus graph stores into materialized `Graph` objects through `Graph.from_storage(...)`, which is the main path for large-graph and feature-store-backed workflows.
 - `vgl.ops` centralizes reusable graph transforms such as self-loop rewrites, bidirection conversion, induced subgraphs, relation-local hetero subgraphs, k-hop expansion, and compaction.
-- `vgl.data` now includes dataset manifests, local cache helpers, fixture-backed datasets, and an on-disk graph dataset format for reproducible pipelines.
+- `vgl.data` now includes dataset manifests, local cache helpers, fixture-backed datasets, and an on-disk graph dataset format that round-trips homogeneous, heterogeneous, and temporal graphs for reproducible pipelines.
 - `vgl.distributed` starts the shard-aware surface with partition manifests, deterministic local partition writing, local shard loading, shard/global id remapping, partition edge and adjacency queries, and single-process coordination contracts.
 
 These layers are intentionally underneath the user-facing API: models still consume `Graph` / batch objects, loaders still start at `Loader`, and training still starts at `Trainer`.

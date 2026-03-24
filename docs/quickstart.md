@@ -31,7 +31,7 @@ For advanced systems work, the new foundation layers sit underneath the same sur
 - `vgl.sparse` for cached COO/CSR/CSC adjacency layouts, transpose/reduction helpers, and sparse operators
 - `vgl.storage` for feature / graph stores and `Graph.from_storage(...)`
 - `vgl.ops` for reusable graph transforms, homogeneous/heterogeneous relation-local subgraph extraction, and compaction
-- `vgl.data` for dataset manifests, cache helpers, built-in datasets, and on-disk datasets
+- `vgl.data` for dataset manifests, cache helpers, built-in datasets, and manifest-backed homo/hetero/temporal on-disk datasets
 - `vgl.distributed` for partition metadata, local shard loading, partition graph queries, and sampling coordination contracts
 
 The smallest workflow is:
@@ -272,6 +272,9 @@ manifest = DatasetManifest(
 )
 OnDiskGraphDataset.write("artifacts/toy", manifest, graphs)
 dataset = OnDiskGraphDataset("artifacts/toy")
+
+# graphs may contain Graph.homo(...), Graph.hetero(...), or Graph.temporal(...)
+first_graph = dataset[0]
 ```
 
 ### Local Partition and Shard Flows

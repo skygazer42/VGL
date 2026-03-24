@@ -3,6 +3,7 @@ from pathlib import Path
 
 import torch
 
+from vgl.data.ondisk import deserialize_graph
 from vgl.distributed.partition import PartitionManifest, PartitionShard, load_partition_manifest
 from vgl.graph.graph import Graph
 from vgl.graph.schema import GraphSchema
@@ -42,8 +43,17 @@ class LocalGraphShard:
 
         payload = torch.load(root / partition.path, weights_only=True)
         graph_payload = payload["graph"]
-        node_data = dict(graph_payload["node_data"])
-        edge_data = dict(graph_payload.get("edge_data", {}))
+        graph = deserialize_graph(graph_payload)
+        if set(graph.nodes) != {"node"} or len(graph.edges) != 1 or graph.schema.time_attr is not None:
+            raise ValueError("LocalGraphShard currently supports homogeneous non-temporal partitions only")
+        edge_type = graph._default_edge_type()
+        node_data = dict(graph.nodes["node"].data)
+        edge_store = graph.edges[edge_type]
+        edge_data = {
+            key: value
+            for key, value in edge_store.data.items()
+            if key != "edge_index"
+        }
         node_ids = payload.get("node_ids", node_data.get("n_id"))
         if node_ids is None:
             start, end = partition.node_range
@@ -65,7 +75,7 @@ class LocalGraphShard:
             }
         )
         graph_store = InMemoryGraphStore(
-            edges={EDGE_TYPE: graph_payload["edge_index"]},
+            edges={EDGE_TYPE: edge_store.edge_index},
             num_nodes={"node": int(node_ids.numel())},
         )
         schema = GraphSchema(

@@ -1,6 +1,7 @@
 import torch
 
 from vgl import Graph
+from vgl.data.ondisk import deserialize_graph
 from vgl.distributed.partition import load_partition_manifest
 from vgl.distributed.writer import write_partitioned_graph
 
@@ -19,7 +20,10 @@ def test_partition_writer_splits_graph_into_local_files(tmp_path):
     assert manifest.num_partitions == 2
     assert loaded.owner(0).partition_id == 0
     assert loaded.owner(3).partition_id == 1
+    part0_graph = deserialize_graph(part0["graph"])
+    part1_graph = deserialize_graph(part1["graph"])
+
     assert torch.equal(part0["node_ids"], torch.tensor([0, 1]))
     assert torch.equal(part1["node_ids"], torch.tensor([2, 3]))
-    assert torch.equal(part0["graph"]["edge_index"], torch.tensor([[0], [1]]))
-    assert torch.equal(part1["graph"]["edge_index"], torch.tensor([[0], [1]]))
+    assert torch.equal(part0_graph.edge_index, torch.tensor([[0], [1]]))
+    assert torch.equal(part1_graph.edge_index, torch.tensor([[0], [1]]))

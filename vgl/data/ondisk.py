@@ -9,27 +9,39 @@ from vgl.graph.graph import Graph
 
 
 def serialize_graph(graph: Graph) -> dict:
-    if set(graph.nodes) != {"node"} or len(graph.edges) != 1 or graph.schema.time_attr is not None:
-        raise ValueError("OnDiskGraphDataset currently supports homogeneous non-temporal graphs only")
-    edge_type = graph._default_edge_type()
-    edge_store = graph.edges[edge_type]
     return {
-        "edge_index": edge_store.edge_index,
-        "node_data": dict(graph.nodes["node"].data),
-        "edge_data": {
-            key: value
-            for key, value in edge_store.data.items()
-            if key != "edge_index"
+        "nodes": {
+            node_type: dict(store.data)
+            for node_type, store in graph.nodes.items()
         },
+        "edges": {
+            tuple(edge_type): dict(store.data)
+            for edge_type, store in graph.edges.items()
+        },
+        "time_attr": graph.schema.time_attr,
     }
 
 
 def deserialize_graph(payload: dict) -> Graph:
-    return Graph.homo(
-        edge_index=payload["edge_index"],
-        edge_data=dict(payload.get("edge_data", {})),
-        **dict(payload["node_data"]),
-    )
+    if "nodes" not in payload or "edges" not in payload:
+        return Graph.homo(
+            edge_index=payload["edge_index"],
+            edge_data=dict(payload.get("edge_data", {})),
+            **dict(payload["node_data"]),
+        )
+
+    nodes = {
+        node_type: dict(node_data)
+        for node_type, node_data in payload["nodes"].items()
+    }
+    edges = {
+        tuple(edge_type): dict(edge_data)
+        for edge_type, edge_data in payload["edges"].items()
+    }
+    time_attr = payload.get("time_attr")
+    if time_attr is not None:
+        return Graph.temporal(nodes=nodes, edges=edges, time_attr=time_attr)
+    return Graph.hetero(nodes=nodes, edges=edges)
 
 
 def manifest_from_dict(payload: dict) -> DatasetManifest:
