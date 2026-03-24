@@ -29,7 +29,7 @@ Legacy `vgl.data` and `vgl.train` paths still work, but new code should prefer t
 For advanced systems work, the new foundation layers sit underneath the same surface API:
 
 - `vgl.sparse` for cached COO/CSR/CSC adjacency layouts, transpose/reduction helpers, and sparse operators
-- `vgl.storage` for feature / graph stores and `Graph.from_storage(...)`
+- `vgl.storage` for feature / graph stores, mmap-backed feature tensors, and `Graph.from_storage(...)`
 - `vgl.ops` for reusable graph transforms, homogeneous/heterogeneous relation-local subgraph extraction, and compaction
 - `vgl.data` for dataset manifests, cache helpers, built-in datasets, and manifest-backed homo/hetero/temporal on-disk datasets
 - `vgl.distributed` for partition metadata, local shard loading, partition graph queries, and sampling coordination contracts
@@ -239,7 +239,7 @@ trainer.fit(loader)
 ```python
 import torch
 from vgl.graph import GraphSchema, Graph
-from vgl.storage import FeatureStore, InMemoryGraphStore, InMemoryTensorStore
+from vgl.storage import FeatureStore, InMemoryGraphStore, MmapTensorStore
 
 edge_type = ("node", "to", "node")
 schema = GraphSchema(
@@ -248,8 +248,9 @@ schema = GraphSchema(
     node_features={"node": ("x",)},
     edge_features={edge_type: ("edge_index",)},
 )
+MmapTensorStore.save("artifacts/features/x.bin", torch.randn(4, 16))
 feature_store = FeatureStore({
-    ("node", "node", "x"): InMemoryTensorStore(torch.randn(4, 16)),
+    ("node", "node", "x"): MmapTensorStore("artifacts/features/x.bin"),
 })
 graph_store = InMemoryGraphStore(
     edges={edge_type: torch.tensor([[0, 1, 2], [1, 2, 3]])},
