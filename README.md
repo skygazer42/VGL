@@ -69,7 +69,7 @@
 ### Foundation Layers
 
 - `vgl.sparse` is where adjacency layouts and sparse execution helpers live. It now exposes COO/CSR/CSC conversion, transpose, row/column structural selection, additive reductions, and cached adjacency views through `Graph.adjacency(...)`.
-- `vgl.storage` turns in-memory or mmap-backed tensor stores plus graph stores into materialized `Graph` objects through `Graph.from_storage(...)`, which is the main path for large-graph and feature-store-backed workflows.
+- `vgl.storage` turns in-memory or mmap-backed tensor stores plus graph stores into lazily feature-backed `Graph` objects through `Graph.from_storage(...)`, which is the main path for large-graph and feature-store-backed workflows.
 - `vgl.ops` centralizes reusable graph transforms such as self-loop rewrites, bidirection conversion, induced subgraphs, relation-local hetero subgraphs, k-hop expansion, and compaction.
 - `vgl.data` now includes dataset manifests, local cache helpers, fixture-backed datasets, and an on-disk graph dataset format that round-trips homogeneous, heterogeneous, and temporal graphs for reproducible pipelines.
 - `vgl.distributed` starts the shard-aware surface with partition manifests, deterministic local partition writing, local shard loading, shard/global id remapping, partition edge and adjacency queries, and single-process coordination contracts.

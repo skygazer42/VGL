@@ -257,6 +257,9 @@ graph_store = InMemoryGraphStore(
     num_nodes={"node": 4},
 )
 graph = Graph.from_storage(schema=schema, feature_store=feature_store, graph_store=graph_store)
+
+# edge structure is ready immediately; x is resolved from the feature store on first access
+node_features = graph.x
 adjacency = graph.adjacency(layout="coo")
 ```
 

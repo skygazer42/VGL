@@ -1,9 +1,10 @@
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 import torch
 
 
-def _transfer_data(data: dict, *, device=None, dtype=None, non_blocking: bool = False) -> dict:
+def _transfer_data(data: Mapping, *, device=None, dtype=None, non_blocking: bool = False) -> dict:
     transferred = {}
     for key, value in data.items():
         if not isinstance(value, torch.Tensor):
@@ -21,26 +22,72 @@ def _transfer_data(data: dict, *, device=None, dtype=None, non_blocking: bool = 
     return transferred
 
 
-def _pin_data(data: dict) -> dict:
+def _pin_data(data: Mapping) -> dict:
     return {
         key: value.pin_memory() if isinstance(value, torch.Tensor) else value
         for key, value in data.items()
     }
 
 
+class LazyFeatureMap(Mapping):
+    def __init__(self, values: dict[str, object] | None = None, loaders: dict[str, object] | None = None):
+        self._values = dict(values or {})
+        self._loaders = dict(loaders or {})
+
+    def _resolve(self, key: str):
+        if key in self._values:
+            return self._values[key]
+        try:
+            loader = self._loaders.pop(key)
+        except KeyError as exc:
+            raise KeyError(key) from exc
+        value = loader()
+        self._values[key] = value
+        return value
+
+    def __getitem__(self, key: str):
+        return self._resolve(key)
+
+    def __iter__(self):
+        return iter(dict.fromkeys((*self._values.keys(), *self._loaders.keys())))
+
+    def __len__(self) -> int:
+        return len(set(self._values) | set(self._loaders))
+
+    def items(self):
+        for key in self:
+            yield key, self[key]
+
+    def keys(self):
+        return tuple(self)
+
+    def values(self):
+        for _, value in self.items():
+            yield value
+
+    def get(self, key, default=None):
+        try:
+            return self[key]
+        except KeyError:
+            return default
+
+
 @dataclass(slots=True)
 class NodeStore:
     type_name: str
-    data: dict[str, torch.Tensor] = field(default_factory=dict)
+    data: Mapping[str, object] = field(default_factory=dict)
 
     @classmethod
     def from_feature_store(cls, type_name, feature_names, feature_store):
-        data = {}
+        loaders = {}
         for feature_name in feature_names:
             key = ("node", type_name, feature_name)
-            index = torch.arange(feature_store.shape(key)[0], dtype=torch.long)
-            data[feature_name] = feature_store.fetch(key, index).values
-        return cls(type_name, data)
+            count = feature_store.shape(key)[0]
+            loaders[feature_name] = lambda key=key, count=count, feature_store=feature_store: feature_store.fetch(
+                key,
+                torch.arange(count, dtype=torch.long),
+            ).values
+        return cls(type_name, LazyFeatureMap(loaders=loaders))
 
     def __getattr__(self, name: str) -> torch.Tensor:
         try:
@@ -66,20 +113,23 @@ class NodeStore:
 @dataclass(slots=True)
 class EdgeStore:
     type_name: tuple[str, str, str]
-    data: dict[str, torch.Tensor] = field(default_factory=dict)
+    data: Mapping[str, object] = field(default_factory=dict)
     adjacency_cache: dict[str, object] = field(default_factory=dict)
 
     @classmethod
     def from_storage(cls, type_name, feature_names, feature_store, graph_store):
         edge_count = graph_store.edge_count(type_name)
-        data = {"edge_index": graph_store.edge_index(type_name)}
-        index = torch.arange(edge_count, dtype=torch.long)
+        values = {"edge_index": graph_store.edge_index(type_name)}
+        loaders = {}
         for feature_name in feature_names:
             if feature_name == "edge_index":
                 continue
             key = ("edge", type_name, feature_name)
-            data[feature_name] = feature_store.fetch(key, index).values
-        return cls(type_name, data)
+            loaders[feature_name] = lambda key=key, edge_count=edge_count, feature_store=feature_store: feature_store.fetch(
+                key,
+                torch.arange(edge_count, dtype=torch.long),
+            ).values
+        return cls(type_name, LazyFeatureMap(values=values, loaders=loaders))
 
     def __getattr__(self, name: str) -> torch.Tensor:
         try:
