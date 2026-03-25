@@ -35,6 +35,21 @@ def _resolve_fetch_index(stage: "PlanStage", context: "MaterializationContext", 
     return _resolve_state_index(context, stage.params["index_key"], type_name=type_name)
 
 
+def _resolve_link_record_edge_type(record) -> tuple[str, str, str]:
+    edge_type = getattr(record, "edge_type", None)
+    if edge_type is None:
+        edge_type = getattr(record, "metadata", {}).get("edge_type")
+    if edge_type is not None:
+        return tuple(edge_type)
+    graph = record.graph
+    if len(graph.edges) == 1:
+        return next(iter(graph.edges))
+    try:
+        return graph._default_edge_type()
+    except AttributeError as exc:
+        raise ValueError("Link prediction on heterogeneous graphs requires edge_type") from exc
+
+
 def _graph_node_global_ids(graph, node_ids: torch.Tensor, *, node_type: str) -> torch.Tensor:
     node_ids = torch.as_tensor(node_ids, dtype=torch.long).view(-1)
     node_store = graph.nodes[str(node_type)]
@@ -338,29 +353,42 @@ def _stitched_hetero_frontier_candidates(
     return {node_type: sorted(values) for node_type, values in candidates.items()}
 
 
-def _expand_stitched_hetero_node_ids(
-    graph,
+def _expand_stitched_hetero_global_node_ids(
     source,
-    seed_local_ids: torch.Tensor,
+    seed_global_ids_by_type: dict[str, torch.Tensor],
     *,
-    seed_node_type: str,
+    edge_types,
     fanouts,
     generator=None,
-) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
-    seed_local_ids = torch.as_tensor(seed_local_ids, dtype=torch.long).view(-1)
-    seed_global_ids = _graph_node_global_ids(graph, seed_local_ids, node_type=seed_node_type)
-    device = seed_global_ids.device
-    visited_by_type = {node_type: set() for node_type in graph.schema.node_types}
-    visited_by_type[seed_node_type].update(int(node) for node in seed_global_ids.tolist())
+) -> dict[str, torch.Tensor]:
+    normalized_seeds = {
+        node_type: torch.as_tensor(node_ids, dtype=torch.long).view(-1)
+        for node_type, node_ids in seed_global_ids_by_type.items()
+    }
+    device = None
+    for seed_ids in normalized_seeds.values():
+        if seed_ids.numel() > 0:
+            device = seed_ids.device
+            break
+    if device is None:
+        first_seed = next(iter(normalized_seeds.values()), None)
+        device = first_seed.device if first_seed is not None else torch.device("cpu")
+
+    visited_by_type = {
+        node_type: {int(node) for node in seed_ids.tolist()}
+        for node_type, seed_ids in normalized_seeds.items()
+    }
     frontier_by_type = {
-        seed_node_type: torch.tensor(sorted(visited_by_type[seed_node_type]), dtype=torch.long, device=device)
+        node_type: torch.tensor(sorted(node_ids), dtype=torch.long, device=device)
+        for node_type, node_ids in visited_by_type.items()
+        if node_ids
     }
     for fanout in fanouts:
         candidate_nodes = _stitched_hetero_frontier_candidates(
             source,
             frontier_by_type,
             visited_by_type,
-            edge_types=tuple(graph.edges),
+            edge_types=edge_types,
         )
         next_frontier = {}
         for node_type, values in candidate_nodes.items():
@@ -377,11 +405,61 @@ def _expand_stitched_hetero_node_ids(
             break
         frontier_by_type = next_frontier
 
-    node_ids_by_type = {
+    return {
         node_type: torch.tensor(sorted(values), dtype=torch.long, device=device)
         for node_type, values in visited_by_type.items()
     }
+
+
+def _expand_stitched_hetero_node_ids(
+    graph,
+    source,
+    seed_local_ids: torch.Tensor,
+    *,
+    seed_node_type: str,
+    fanouts,
+    generator=None,
+) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+    seed_local_ids = torch.as_tensor(seed_local_ids, dtype=torch.long).view(-1)
+    seed_global_ids = _graph_node_global_ids(graph, seed_local_ids, node_type=seed_node_type)
+    seed_global_ids_by_type = {}
+    for node_type in graph.schema.node_types:
+        if node_type == seed_node_type:
+            seed_global_ids_by_type[node_type] = seed_global_ids
+            continue
+        seed_global_ids_by_type[node_type] = torch.empty(
+            (0,),
+            dtype=torch.long,
+            device=_infer_data_device(graph.nodes[node_type].data),
+        )
+    node_ids_by_type = _expand_stitched_hetero_global_node_ids(
+        source,
+        seed_global_ids_by_type,
+        edge_types=tuple(graph.edges),
+        fanouts=fanouts,
+        generator=generator,
+    )
     return seed_global_ids, node_ids_by_type
+
+
+def _stitched_hetero_link_seed_global_ids(graph, records) -> dict[str, torch.Tensor]:
+    seed_local_ids_by_type = {node_type: set() for node_type in graph.schema.node_types}
+    for record in records:
+        src_type, _, dst_type = _resolve_link_record_edge_type(record)
+        seed_local_ids_by_type[src_type].add(int(record.src_index))
+        seed_local_ids_by_type[dst_type].add(int(record.dst_index))
+
+    seed_global_ids_by_type = {}
+    for node_type in graph.schema.node_types:
+        local_ids = sorted(seed_local_ids_by_type[node_type])
+        device = _infer_data_device(graph.nodes[node_type].data)
+        local_tensor = torch.tensor(local_ids, dtype=torch.long, device=device)
+        seed_global_ids_by_type[node_type] = _graph_node_global_ids(
+            graph,
+            local_tensor,
+            node_type=node_type,
+        )
+    return seed_global_ids_by_type
 
 
 def _collect_stitched_hetero_edges(
@@ -1050,6 +1128,52 @@ def _build_stitched_homo_link_records(graph, records, stitched_graph: Graph) -> 
     return sampled_records
 
 
+def _build_stitched_hetero_link_records(graph, records, stitched_graph: Graph) -> list[LinkPredictionRecord]:
+    seed_positions_by_type = {
+        node_type: {
+            int(node_id): index
+            for index, node_id in enumerate(stitched_graph.nodes[node_type].data["n_id"].tolist())
+        }
+        for node_type in stitched_graph.nodes
+    }
+    sampled_records = []
+    for record in records:
+        edge_type = _resolve_link_record_edge_type(record)
+        src_type, _, dst_type = edge_type
+        src_global = int(
+            _graph_node_global_ids(
+                graph,
+                torch.tensor([record.src_index], dtype=torch.long),
+                node_type=src_type,
+            ).item()
+        )
+        dst_global = int(
+            _graph_node_global_ids(
+                graph,
+                torch.tensor([record.dst_index], dtype=torch.long),
+                node_type=dst_type,
+            ).item()
+        )
+        sampled_records.append(
+            LinkPredictionRecord(
+                graph=stitched_graph,
+                src_index=seed_positions_by_type[src_type][src_global],
+                dst_index=seed_positions_by_type[dst_type][dst_global],
+                label=int(record.label),
+                metadata=dict(record.metadata),
+                sample_id=record.sample_id,
+                exclude_seed_edge=bool(record.exclude_seed_edge),
+                hard_negative_dst=record.hard_negative_dst,
+                candidate_dst=record.candidate_dst,
+                edge_type=edge_type,
+                reverse_edge_type=record.reverse_edge_type,
+                query_id=record.query_id,
+                filter_ranking=bool(record.filter_ranking),
+            )
+        )
+    return sampled_records
+
+
 @dataclass(slots=True)
 class MaterializationContext:
     request: Any
@@ -1211,7 +1335,11 @@ class PlanExecutor:
         sampler = stage.params["sampler"]
         records = list(stage.params["records"])
         graph = records[0].graph
-        if _match_partition_shard(graph, context.feature_store) is not None:
+        stitched_homo_partition = _match_partition_shard(graph, context.feature_store)
+        stitched_hetero_partition = None
+        if stitched_homo_partition is None:
+            stitched_hetero_partition = _match_hetero_partition_shard(graph, context.feature_store)
+        if stitched_homo_partition is not None:
             seed_local_ids = torch.tensor(
                 [int(node) for record in records for node in (record.src_index, record.dst_index)],
                 dtype=torch.long,
@@ -1238,6 +1366,29 @@ class PlanExecutor:
             )
             sampled_records = _build_stitched_homo_link_records(graph, records, stitched_graph)
             sampled = sampled_records if bool(stage.params["is_sequence"]) else sampled_records[0]
+        elif stitched_hetero_partition is not None:
+            seed_global_ids_by_type = _stitched_hetero_link_seed_global_ids(graph, records)
+            node_ids_by_type = _expand_stitched_hetero_global_node_ids(
+                context.feature_store,
+                seed_global_ids_by_type,
+                edge_types=tuple(graph.edges),
+                fanouts=sampler.num_neighbors,
+                generator=getattr(sampler, "_generator", None),
+            )
+            edge_ids_by_type, edge_index_by_type = _collect_stitched_hetero_edges(
+                context.feature_store,
+                node_ids_by_type,
+                edge_types=tuple(graph.edges),
+            )
+            stitched_graph = _build_stitched_hetero_graph(
+                graph,
+                context.feature_store,
+                node_ids_by_type,
+                edge_ids_by_type,
+                _relabel_stitched_edge_index_by_type(node_ids_by_type, edge_index_by_type),
+            )
+            sampled_records = _build_stitched_hetero_link_records(graph, records, stitched_graph)
+            sampled = sampled_records if bool(stage.params["is_sequence"]) else sampled_records[0]
         else:
             sampled = sampler._sample_from_seed_records(records, is_sequence=bool(stage.params["is_sequence"]))
         if isinstance(sampled, (list, tuple)):
@@ -1248,9 +1399,12 @@ class PlanExecutor:
             context.state["record"] = sampled
             sampled_graph = sampled.graph
         _store_sampled_graph_indices(context, sampled_graph)
-        if _match_partition_shard(graph, context.feature_store) is not None:
+        if stitched_homo_partition is not None:
             context.state["node_ids_global"] = context.state["node_ids"]
             context.state["edge_ids_global"] = context.state["edge_ids"]
+        elif stitched_hetero_partition is not None:
+            context.state["node_ids_by_type_global"] = context.state["node_ids_by_type"]
+            context.state["edge_ids_by_type_global"] = context.state["edge_ids_by_type"]
         return context
 
     @staticmethod

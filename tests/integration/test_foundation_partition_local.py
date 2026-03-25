@@ -595,3 +595,79 @@ def test_local_partition_sampled_link_training_stitched_link_sampling_crosses_pa
     history = trainer.fit(loader)
 
     assert history["completed_epochs"] == 1
+
+
+
+class TinyStitchedPartitionHeteroLinkPredictor(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.scorer = nn.Linear(2, 1)
+
+    def forward(self, batch):
+        writes = ("author", "writes", "paper")
+        written_by = ("paper", "written_by", "author")
+        assert batch.edge_type == writes
+        assert batch.src_node_type == "author"
+        assert batch.dst_node_type == "paper"
+        assert torch.equal(batch.graph.nodes["author"].n_id, torch.tensor([0, 2]))
+        assert torch.equal(batch.graph.nodes["paper"].n_id, torch.tensor([0]))
+        assert torch.equal(batch.graph.nodes["author"].x.view(-1), torch.tensor([10.0, 30.0]))
+        assert torch.equal(batch.graph.nodes["paper"].x.view(-1), torch.tensor([1.0]))
+        assert torch.equal(batch.graph.edges[writes].edge_index, torch.tensor([[0, 1], [0, 0]]))
+        assert torch.equal(batch.graph.edges[written_by].edge_index, torch.tensor([[0, 0], [0, 1]]))
+        assert torch.equal(batch.src_index, torch.tensor([0]))
+        assert torch.equal(batch.dst_index, torch.tensor([0]))
+        src_x = batch.graph.nodes["author"].x[batch.src_index]
+        dst_x = batch.graph.nodes["paper"].x[batch.dst_index]
+        return self.scorer(torch.cat([src_x, dst_x], dim=-1)).squeeze(-1)
+
+
+def test_local_partition_sampled_link_training_stitched_hetero_link_sampling_crosses_partition_boundaries(tmp_path):
+    writes = ("author", "writes", "paper")
+    written_by = ("paper", "written_by", "author")
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.tensor([[10.0], [20.0], [30.0]])},
+            "paper": {"x": torch.tensor([[1.0], [2.0]])},
+        },
+        edges={
+            writes: {"edge_index": torch.tensor([[0, 2], [0, 0]])},
+            written_by: {"edge_index": torch.tensor([[0, 0], [0, 2]])},
+        },
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    coordinator = LocalSamplingCoordinator(shards)
+    loader = DataLoader(
+        dataset=ListDataset(
+            [
+                LinkPredictionRecord(
+                    graph=shards[0].graph,
+                    src_index=0,
+                    dst_index=0,
+                    label=1,
+                    edge_type=writes,
+                )
+            ]
+        ),
+        sampler=LinkNeighborSampler(
+            num_neighbors=[-1],
+            node_feature_names={"author": ("x",), "paper": ("x",)},
+        ),
+        batch_size=1,
+        feature_store=coordinator,
+    )
+    trainer = Trainer(
+        model=TinyStitchedPartitionHeteroLinkPredictor(),
+        task=LinkPredictionTask(target="label"),
+        optimizer=torch.optim.Adam,
+        lr=1e-2,
+        max_epochs=1,
+    )
+
+    history = trainer.fit(loader)
+
+    assert history["completed_epochs"] == 1
