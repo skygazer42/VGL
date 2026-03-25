@@ -163,15 +163,23 @@ def spmm(sparse: SparseTensor, dense: torch.Tensor) -> torch.Tensor:
         raise ValueError("dense input must be rank-2")
     if dense.size(0) != coo.shape[1]:
         raise ValueError("dense input row count must match sparse column dimension")
-    result = dense.new_zeros((coo.shape[0], dense.size(1)))
+
+    values = coo.values
+    if values is None or values.ndim == 1:
+        result = dense.new_zeros((coo.shape[0], dense.size(1)))
+    else:
+        result = dense.new_zeros((coo.shape[0],) + tuple(values.shape[1:]) + (dense.size(1),))
     if coo.nnz == 0:
         return result
-    values = coo.values
+
     source = dense[coo.col]
     if values is not None:
-        if values.ndim != 1:
-            raise ValueError("spmm currently requires scalar sparse values")
-        source = source * values.unsqueeze(-1).to(dtype=source.dtype)
+        if values.ndim == 1:
+            source = source * values.unsqueeze(-1).to(dtype=source.dtype)
+        else:
+            payload = values.to(dtype=source.dtype).unsqueeze(-1)
+            source = source.reshape((source.size(0),) + (1,) * (values.ndim - 1) + (source.size(1),))
+            source = payload * source
     result.index_add_(0, coo.row, source)
     return result
 

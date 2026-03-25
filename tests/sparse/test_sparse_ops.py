@@ -295,7 +295,7 @@ def test_edge_softmax_normalizes_multi_head_scores():
     assert torch.allclose(weights[3:], torch.tensor([[1.0, 1.0]]))
 
 
-def test_spmm_rejects_multi_dimensional_sparse_values():
+def test_spmm_supports_multi_head_sparse_values():
     sparse = from_edge_index(
         torch.tensor([[0, 0, 2], [1, 2, 0]]),
         shape=(3, 3),
@@ -303,5 +303,83 @@ def test_spmm_rejects_multi_dimensional_sparse_values():
     )
     dense = torch.tensor([[1.0, 0.0], [0.0, 1.0], [1.0, 1.0]])
 
-    with pytest.raises(ValueError, match="scalar"):
-        spmm(sparse, dense)
+    result = spmm(sparse, dense)
+
+    assert result.shape == (3, 2, 2)
+    assert torch.equal(
+        result,
+        torch.tensor(
+            [
+                [[2.0, 3.0], [20.0, 30.0]],
+                [[0.0, 0.0], [0.0, 0.0]],
+                [[3.0, 0.0], [30.0, 0.0]],
+            ]
+        ),
+    )
+
+
+def test_spmm_supports_higher_rank_sparse_payloads():
+    sparse = from_edge_index(
+        torch.tensor([[0, 0, 2], [1, 2, 0]]),
+        shape=(3, 3),
+        values=torch.tensor(
+            [
+                [[1.0, 10.0], [2.0, 20.0]],
+                [[3.0, 30.0], [4.0, 40.0]],
+                [[5.0, 50.0], [6.0, 60.0]],
+            ]
+        ),
+    )
+    dense = torch.tensor([[1.0, 0.0], [0.0, 1.0], [1.0, 1.0]])
+
+    result = spmm(sparse, dense)
+
+    assert result.shape == (3, 2, 2, 2)
+    assert torch.equal(
+        result,
+        torch.tensor(
+            [
+                [[[3.0, 4.0], [30.0, 40.0]], [[4.0, 6.0], [40.0, 60.0]]],
+                [[[0.0, 0.0], [0.0, 0.0]], [[0.0, 0.0], [0.0, 0.0]]],
+                [[[5.0, 0.0], [50.0, 0.0]], [[6.0, 0.0], [60.0, 0.0]]],
+            ]
+        ),
+    )
+
+
+def test_spmm_returns_correct_shape_for_empty_multi_value_sparse_tensor():
+    sparse = from_edge_index(
+        torch.empty((2, 0), dtype=torch.long),
+        shape=(3, 3),
+        values=torch.empty((0, 2)),
+    )
+    dense = torch.tensor([[1.0, 0.0], [0.0, 1.0], [1.0, 1.0]])
+
+    result = spmm(sparse, dense)
+
+    assert result.shape == (3, 2, 2)
+    assert torch.equal(result, torch.zeros((3, 2, 2)))
+
+
+def test_spmm_supports_multi_value_compressed_sparse_inputs():
+    sparse = from_edge_index(
+        torch.tensor([[0, 0, 2], [1, 2, 0]]),
+        shape=(3, 3),
+        layout=SparseLayout.CSR,
+        values=torch.tensor([[1.0, 10.0], [2.0, 20.0], [3.0, 30.0]]),
+    )
+    dense = torch.tensor([[1.0, 0.0], [0.0, 1.0], [1.0, 1.0]])
+
+    result = spmm(sparse, dense)
+
+    assert result.shape == (3, 2, 2)
+    assert torch.equal(
+        result,
+        torch.tensor(
+            [
+                [[2.0, 3.0], [20.0, 30.0]],
+                [[0.0, 0.0], [0.0, 0.0]],
+                [[3.0, 0.0], [30.0, 0.0]],
+            ]
+        ),
+    )
