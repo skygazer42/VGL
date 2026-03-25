@@ -4,7 +4,7 @@ import torch
 from typing import Any, Callable
 
 from vgl.dataloading.plan import PlanStage, SamplingPlan
-from vgl.dataloading.records import SampleRecord
+from vgl.dataloading.records import LinkPredictionRecord, SampleRecord
 from vgl.graph.graph import Graph
 from vgl.storage.base import TensorSlice
 
@@ -199,22 +199,38 @@ def _stitched_frontier_candidates(source, frontier_global_ids: torch.Tensor, vis
     return sorted(candidates)
 
 
-def _expand_stitched_homo_node_ids(graph, source, seed_local_ids: torch.Tensor, *, fanouts) -> tuple[torch.Tensor, torch.Tensor]:
-    seed_local_ids = torch.as_tensor(seed_local_ids, dtype=torch.long).view(-1)
-    seed_global_ids = _graph_node_global_ids(graph, seed_local_ids, node_type="node")
+def _expand_stitched_homo_global_node_ids(
+    source,
+    seed_global_ids: torch.Tensor,
+    *,
+    fanouts,
+    edge_type,
+    generator=None,
+) -> torch.Tensor:
+    seed_global_ids = torch.as_tensor(seed_global_ids, dtype=torch.long).view(-1)
     visited = {int(node) for node in seed_global_ids.tolist()}
-    frontier = seed_global_ids
-    edge_type = graph._default_edge_type()
+    frontier = torch.tensor(sorted(visited), dtype=torch.long, device=seed_global_ids.device)
     for fanout in fanouts:
         candidate_nodes = _stitched_frontier_candidates(source, frontier, visited, edge_type=edge_type)
         if fanout != -1 and len(candidate_nodes) > int(fanout):
-            permutation = torch.randperm(len(candidate_nodes))[: int(fanout)].tolist()
+            permutation = torch.randperm(len(candidate_nodes), generator=generator)[: int(fanout)].tolist()
             candidate_nodes = [candidate_nodes[index] for index in permutation]
         frontier = torch.tensor(candidate_nodes, dtype=torch.long, device=seed_global_ids.device)
         visited.update(int(node) for node in frontier.tolist())
         if frontier.numel() == 0:
             break
-    return seed_global_ids, torch.tensor(sorted(visited), dtype=torch.long, device=seed_global_ids.device)
+    return torch.tensor(sorted(visited), dtype=torch.long, device=seed_global_ids.device)
+
+
+def _expand_stitched_homo_node_ids(graph, source, seed_local_ids: torch.Tensor, *, fanouts) -> tuple[torch.Tensor, torch.Tensor]:
+    seed_local_ids = torch.as_tensor(seed_local_ids, dtype=torch.long).view(-1)
+    seed_global_ids = _graph_node_global_ids(graph, seed_local_ids, node_type="node")
+    return seed_global_ids, _expand_stitched_homo_global_node_ids(
+        source,
+        seed_global_ids,
+        fanouts=fanouts,
+        edge_type=graph._default_edge_type(),
+    )
 
 
 def _collect_stitched_homo_edges(source, node_ids_global: torch.Tensor, *, edge_type) -> tuple[torch.Tensor, torch.Tensor]:
@@ -296,23 +312,33 @@ def _fetch_stitched_homo_node_data(graph, source, node_ids_global: torch.Tensor)
     return node_data
 
 
-def _fetch_stitched_homo_edge_feature(graph, source, edge_ids_global: torch.Tensor, *, edge_type, feature_name: str) -> torch.Tensor:
-    edge_ids_global = torch.as_tensor(edge_ids_global, dtype=torch.long).view(-1)
-    edge_store = graph.edges[tuple(edge_type)]
-    template = edge_store.data[feature_name]
-    if edge_ids_global.numel() == 0:
-        return template.new_empty((0,) + tuple(template.shape[1:]))
-    try:
-        return source.fetch_edge_features(("edge", tuple(edge_type), feature_name), edge_ids_global).values
-    except KeyError:
-        shards = getattr(source, "shards", None)
-        if not isinstance(shards, dict):
-            raise
+def _fallback_routed_edge_tensor_slice(source, key, edge_ids: torch.Tensor) -> TensorSlice:
+    _, edge_type, feature_name = key
+    edge_type = tuple(edge_type)
+    edge_ids = torch.as_tensor(edge_ids, dtype=torch.long).view(-1)
+    shards = getattr(source, "shards", None)
+    if not isinstance(shards, dict):
+        raise KeyError(f"routed edge feature fallback is unavailable for key {key!r}")
 
-    values = template.new_empty((edge_ids_global.numel(),) + tuple(template.shape[1:]))
-    remaining = {int(edge_id): index for index, edge_id in enumerate(edge_ids_global.tolist())}
+    template = None
     for shard in shards.values():
-        local_feature = shard.graph.edges[tuple(edge_type)].data.get(feature_name)
+        local_feature = shard.graph.edges[edge_type].data.get(feature_name)
+        if isinstance(local_feature, torch.Tensor):
+            template = local_feature
+            break
+        boundary_feature = shard.boundary_edge_data_by_type.get(edge_type, {}).get(feature_name)
+        if isinstance(boundary_feature, torch.Tensor):
+            template = boundary_feature
+            break
+    if template is None:
+        raise KeyError(f"missing routed edge feature {feature_name!r} for edge type {edge_type!r}")
+    if edge_ids.numel() == 0:
+        return TensorSlice(index=edge_ids, values=template.new_empty((0,) + tuple(template.shape[1:])))
+
+    values = template.new_empty((edge_ids.numel(),) + tuple(template.shape[1:]))
+    remaining = {int(edge_id): index for index, edge_id in enumerate(edge_ids.tolist())}
+    for shard in shards.values():
+        local_feature = shard.graph.edges[edge_type].data.get(feature_name)
         local_edge_ids = shard.edge_ids(edge_type=edge_type)
         if isinstance(local_feature, torch.Tensor) and local_feature.ndim > 0 and local_feature.size(0) == local_edge_ids.numel():
             for current_index, edge_id in enumerate(local_edge_ids.tolist()):
@@ -321,7 +347,7 @@ def _fetch_stitched_homo_edge_feature(graph, source, edge_ids_global: torch.Tens
                     continue
                 values[target_index] = local_feature[current_index]
 
-        boundary_data = shard.boundary_edge_data_by_type.get(tuple(edge_type), {})
+        boundary_data = shard.boundary_edge_data_by_type.get(edge_type, {})
         boundary_feature = boundary_data.get(feature_name)
         boundary_edge_ids = torch.as_tensor(boundary_data.get("e_id", torch.empty((0,), dtype=torch.long)), dtype=torch.long).view(-1)
         if isinstance(boundary_feature, torch.Tensor) and boundary_feature.ndim > 0 and boundary_feature.size(0) == boundary_edge_ids.numel():
@@ -335,8 +361,24 @@ def _fetch_stitched_homo_edge_feature(graph, source, edge_ids_global: torch.Tens
 
     if remaining:
         missing = ", ".join(str(edge_id) for edge_id in sorted(remaining))
-        raise KeyError(f"missing stitched edge feature {feature_name!r} for edge ids: {missing}")
-    return values
+        raise KeyError(f"missing routed edge feature {feature_name!r} for edge ids: {missing}")
+    return TensorSlice(index=edge_ids, values=values)
+
+
+def _fetch_stitched_homo_edge_feature(graph, source, edge_ids_global: torch.Tensor, *, edge_type, feature_name: str) -> torch.Tensor:
+    edge_ids_global = torch.as_tensor(edge_ids_global, dtype=torch.long).view(-1)
+    edge_store = graph.edges[tuple(edge_type)]
+    template = edge_store.data[feature_name]
+    if edge_ids_global.numel() == 0:
+        return template.new_empty((0,) + tuple(template.shape[1:]))
+    try:
+        return source.fetch_edge_features(("edge", tuple(edge_type), feature_name), edge_ids_global).values
+    except KeyError:
+        return _fallback_routed_edge_tensor_slice(
+            source,
+            ("edge", tuple(edge_type), feature_name),
+            edge_ids_global,
+        ).values
 
 
 def _fetch_stitched_homo_edge_data(graph, source, edge_ids_global: torch.Tensor, *, edge_type) -> dict[str, Any]:
@@ -399,6 +441,32 @@ def _build_stitched_node_samples(
     if len(samples) == 1:
         return samples[0]
     return samples
+
+
+def _build_stitched_homo_link_records(graph, records, stitched_graph: Graph) -> list[LinkPredictionRecord]:
+    seed_positions = {int(node_id): index for index, node_id in enumerate(stitched_graph.n_id.tolist())}
+    sampled_records = []
+    for record in records:
+        src_global = int(_graph_node_global_ids(graph, torch.tensor([record.src_index]), node_type="node").item())
+        dst_global = int(_graph_node_global_ids(graph, torch.tensor([record.dst_index]), node_type="node").item())
+        sampled_records.append(
+            LinkPredictionRecord(
+                graph=stitched_graph,
+                src_index=seed_positions[src_global],
+                dst_index=seed_positions[dst_global],
+                label=int(record.label),
+                metadata=dict(record.metadata),
+                sample_id=record.sample_id,
+                exclude_seed_edge=bool(record.exclude_seed_edge),
+                hard_negative_dst=record.hard_negative_dst,
+                candidate_dst=record.candidate_dst,
+                edge_type=record.edge_type,
+                reverse_edge_type=record.reverse_edge_type,
+                query_id=record.query_id,
+                filter_ranking=bool(record.filter_ranking),
+            )
+        )
+    return sampled_records
 
 
 @dataclass(slots=True)
@@ -526,7 +594,36 @@ class PlanExecutor:
     def _sample_link_neighbors(stage: PlanStage, context: MaterializationContext) -> MaterializationContext:
         sampler = stage.params["sampler"]
         records = list(stage.params["records"])
-        sampled = sampler._sample_from_seed_records(records, is_sequence=bool(stage.params["is_sequence"]))
+        graph = records[0].graph
+        if _match_partition_shard(graph, context.feature_store) is not None:
+            seed_local_ids = torch.tensor(
+                [int(node) for record in records for node in (record.src_index, record.dst_index)],
+                dtype=torch.long,
+            )
+            seed_global_ids = _graph_node_global_ids(graph, seed_local_ids, node_type="node")
+            node_ids_global = _expand_stitched_homo_global_node_ids(
+                context.feature_store,
+                seed_global_ids,
+                fanouts=sampler.num_neighbors,
+                edge_type=graph._default_edge_type(),
+                generator=getattr(sampler, "_generator", None),
+            )
+            edge_ids_global, edge_index_global = _collect_stitched_homo_edges(
+                context.feature_store,
+                node_ids_global,
+                edge_type=graph._default_edge_type(),
+            )
+            stitched_graph = _build_stitched_homo_graph(
+                graph,
+                context.feature_store,
+                node_ids_global,
+                edge_ids_global,
+                _relabel_stitched_edge_index(node_ids_global, edge_index_global),
+            )
+            sampled_records = _build_stitched_homo_link_records(graph, records, stitched_graph)
+            sampled = sampled_records if bool(stage.params["is_sequence"]) else sampled_records[0]
+        else:
+            sampled = sampler._sample_from_seed_records(records, is_sequence=bool(stage.params["is_sequence"]))
         if isinstance(sampled, (list, tuple)):
             sampled_records = list(sampled)
             context.state["records"] = sampled_records
@@ -535,6 +632,9 @@ class PlanExecutor:
             context.state["record"] = sampled
             sampled_graph = sampled.graph
         _store_sampled_graph_indices(context, sampled_graph)
+        if _match_partition_shard(graph, context.feature_store) is not None:
+            context.state["node_ids_global"] = context.state["node_ids"]
+            context.state["edge_ids_global"] = context.state["edge_ids"]
         return context
 
     @staticmethod
@@ -579,7 +679,13 @@ class PlanExecutor:
             elif entity_kind == "node" and callable(node_fetch):
                 tensor_slice = node_fetch(key, fetch_index)
             elif entity_kind == "edge" and callable(edge_fetch):
-                tensor_slice = edge_fetch(key, fetch_index)
+                try:
+                    tensor_slice = edge_fetch(key, fetch_index)
+                except KeyError:
+                    if routed_source:
+                        tensor_slice = _fallback_routed_edge_tensor_slice(source, key, fetch_index)
+                    else:
+                        raise
             else:
                 raise TypeError(
                     f"feature_store does not support {entity_kind} feature fetch for key {key!r}"

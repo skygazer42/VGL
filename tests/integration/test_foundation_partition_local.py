@@ -4,11 +4,11 @@ import torch
 from torch import nn
 
 from vgl import Graph
-from vgl.dataloading import DataLoader, ListDataset, NodeNeighborSampler
+from vgl.dataloading import DataLoader, LinkNeighborSampler, LinkPredictionRecord, ListDataset, NodeNeighborSampler
 from vgl.distributed import LocalGraphShard, LocalSamplingCoordinator
 from vgl.distributed import write_partitioned_graph
 from vgl.engine import Trainer
-from vgl.tasks import NodeClassificationTask
+from vgl.tasks import LinkPredictionTask, NodeClassificationTask
 
 
 @dataclass(slots=True)
@@ -377,6 +377,62 @@ def test_local_partition_sampled_training_stitched_sampling_crosses_partition_bo
     trainer = Trainer(
         model=TinyStitchedPartitionNodeClassifier(),
         task=NodeClassificationTask(target="y", split=("train_mask", "val_mask", "test_mask")),
+        optimizer=torch.optim.Adam,
+        lr=1e-2,
+        max_epochs=1,
+    )
+
+    history = trainer.fit(loader)
+
+    assert history["completed_epochs"] == 1
+
+
+
+class TinyStitchedPartitionLinkPredictor(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.scorer = nn.Linear(2, 1)
+
+    def forward(self, batch):
+        assert torch.equal(batch.graph.n_id, torch.tensor([0, 1, 2]))
+        assert torch.equal(batch.graph.edge_index, torch.tensor([[0, 1], [1, 2]]))
+        assert torch.equal(batch.graph.x.view(-1), torch.tensor([0.0, 1.0, 2.0]))
+        assert torch.equal(batch.src_index, torch.tensor([0]))
+        assert torch.equal(batch.dst_index, torch.tensor([1]))
+        src_x = batch.graph.x[batch.src_index]
+        dst_x = batch.graph.x[batch.dst_index]
+        return self.scorer(torch.cat([src_x, dst_x], dim=-1)).squeeze(-1)
+
+
+def test_local_partition_sampled_link_training_stitched_link_sampling_crosses_partition_boundaries(tmp_path):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2], [1, 2, 3]]),
+        x=torch.arange(4, dtype=torch.float32).view(4, 1),
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    coordinator = LocalSamplingCoordinator(shards)
+    loader = DataLoader(
+        dataset=ListDataset(
+            [
+                LinkPredictionRecord(
+                    graph=shards[0].graph,
+                    src_index=0,
+                    dst_index=1,
+                    label=1,
+                )
+            ]
+        ),
+        sampler=LinkNeighborSampler(num_neighbors=[-1], node_feature_names=("x",)),
+        batch_size=1,
+        feature_store=coordinator,
+    )
+    trainer = Trainer(
+        model=TinyStitchedPartitionLinkPredictor(),
+        task=LinkPredictionTask(target="label"),
         optimizer=torch.optim.Adam,
         lr=1e-2,
         max_epochs=1,
