@@ -4,7 +4,7 @@ import torch
 from typing import Any, Callable
 
 from vgl.dataloading.plan import PlanStage, SamplingPlan
-from vgl.dataloading.records import LinkPredictionRecord, SampleRecord
+from vgl.dataloading.records import LinkPredictionRecord, SampleRecord, TemporalEventRecord
 from vgl.graph.graph import Graph
 from vgl.storage.base import TensorSlice
 
@@ -153,6 +153,48 @@ def _is_stitched_homo_candidate(graph, source) -> bool:
 
 def _match_partition_shard(graph, source) -> int | None:
     if not _is_stitched_homo_candidate(graph, source):
+        return None
+    graph_node_ids = torch.as_tensor(graph.nodes["node"].data["n_id"], dtype=torch.long).view(-1)
+    try:
+        routes = source.route_node_ids(graph_node_ids, node_type="node")
+    except Exception:
+        return None
+    if len(routes) != 1:
+        return None
+    route = routes[0]
+    try:
+        partition_node_ids = torch.as_tensor(
+            source.partition_node_ids(route.partition_id, node_type="node"),
+            dtype=torch.long,
+        ).view(-1)
+    except Exception:
+        return None
+    if partition_node_ids.numel() != graph_node_ids.numel():
+        return None
+    if not torch.equal(torch.sort(partition_node_ids).values, torch.sort(graph_node_ids).values):
+        return None
+    return int(route.partition_id)
+
+
+def _match_temporal_partition_shard(graph, source) -> int | None:
+    if not (
+        graph is not None
+        and graph.schema.time_attr is not None
+        and set(graph.nodes) == {"node"}
+        and len(graph.edges) == 1
+        and source is not None
+        and graph.nodes["node"].data.get("n_id") is not None
+        and isinstance(getattr(source, "shards", None), dict)
+        and all(
+            callable(getattr(source, name, None))
+            for name in (
+                "route_node_ids",
+                "partition_node_ids",
+                "fetch_node_features",
+                "fetch_edge_features",
+            )
+        )
+    ):
         return None
     graph_node_ids = torch.as_tensor(graph.nodes["node"].data["n_id"], dtype=torch.long).view(-1)
     try:
@@ -443,6 +485,191 @@ def _build_stitched_node_samples(
     return samples
 
 
+def _build_stitched_homo_temporal_graph(
+    graph,
+    source,
+    node_ids_global: torch.Tensor,
+    edge_ids_global: torch.Tensor,
+    edge_index: torch.Tensor,
+    *,
+    edge_type,
+) -> Graph:
+    stitched_graph = Graph.temporal(
+        nodes={"node": _fetch_stitched_homo_node_data(graph, source, node_ids_global)},
+        edges={
+            tuple(edge_type): {
+                "edge_index": edge_index,
+                **_fetch_stitched_homo_edge_data(graph, source, edge_ids_global, edge_type=edge_type),
+            }
+        },
+        time_attr=graph.schema.time_attr,
+    )
+    stitched_graph.feature_store = source
+    return stitched_graph
+
+
+def _build_stitched_homo_temporal_record(graph, record, stitched_graph: Graph) -> TemporalEventRecord:
+    seed_positions = {int(node_id): index for index, node_id in enumerate(stitched_graph.n_id.tolist())}
+    src_global = int(_graph_node_global_ids(graph, torch.tensor([record.src_index]), node_type="node").item())
+    dst_global = int(_graph_node_global_ids(graph, torch.tensor([record.dst_index]), node_type="node").item())
+    edge_type = tuple(record.edge_type) if record.edge_type is not None else graph._default_edge_type()
+    return TemporalEventRecord(
+        graph=stitched_graph,
+        src_index=seed_positions[src_global],
+        dst_index=seed_positions[dst_global],
+        timestamp=int(record.timestamp),
+        label=int(record.label),
+        event_features=record.event_features,
+        metadata=dict(record.metadata),
+        sample_id=record.sample_id,
+        edge_type=edge_type,
+    )
+
+
+def _build_stitched_homo_temporal_history(
+    graph,
+    source,
+    sampler,
+    record,
+    *,
+    edge_type,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    shards = getattr(source, "shards", None)
+    if not isinstance(shards, dict) or not shards:
+        raise ValueError("stitched temporal sampling requires coordinator shard access")
+    time_attr = graph.schema.time_attr
+    if time_attr is None:
+        raise ValueError("stitched temporal sampling requires a temporal graph")
+
+    timestamp = int(record.timestamp)
+    edge_records: dict[int, tuple[int, int, int]] = {}
+    for partition_id in sorted(shards):
+        shard = shards[partition_id]
+        if tuple(edge_type) not in shard.graph.edges:
+            continue
+
+        owned_edge_ids = torch.as_tensor(shard.edge_ids(edge_type=edge_type), dtype=torch.long).view(-1)
+        boundary_data = shard.boundary_edge_data_by_type.get(tuple(edge_type), {})
+        boundary_edge_ids = torch.as_tensor(
+            boundary_data.get("e_id", torch.empty((0,), dtype=torch.long)),
+            dtype=torch.long,
+        ).view(-1)
+        if owned_edge_ids.numel() == 0 and boundary_edge_ids.numel() == 0:
+            continue
+
+        owned_edge_index = torch.as_tensor(shard.global_edge_index(edge_type=edge_type), dtype=torch.long)
+        boundary_edge_index = torch.as_tensor(
+            boundary_data.get("edge_index", torch.empty((2, 0), dtype=torch.long)),
+            dtype=torch.long,
+        )
+        owned_timestamps = torch.as_tensor(shard.graph.edges[tuple(edge_type)].data[time_attr]).view(-1)
+        boundary_timestamps = torch.as_tensor(
+            boundary_data.get(time_attr, torch.empty((0,), dtype=owned_timestamps.dtype)),
+            dtype=owned_timestamps.dtype,
+        ).view(-1)
+
+        shard_edge_ids = torch.cat((owned_edge_ids, boundary_edge_ids), dim=0)
+        shard_edge_index = torch.cat((owned_edge_index, boundary_edge_index), dim=1)
+        shard_timestamps = torch.cat((owned_timestamps, boundary_timestamps), dim=0)
+
+        if sampler.strict_history:
+            edge_mask = shard_timestamps < timestamp
+        else:
+            edge_mask = shard_timestamps <= timestamp
+        if sampler.time_window is not None:
+            edge_mask &= shard_timestamps >= (timestamp - sampler.time_window)
+        if not bool(edge_mask.any()):
+            continue
+
+        for edge_id, src, dst, current_timestamp in zip(
+            shard_edge_ids[edge_mask].tolist(),
+            shard_edge_index[0, edge_mask].tolist(),
+            shard_edge_index[1, edge_mask].tolist(),
+            shard_timestamps[edge_mask].tolist(),
+        ):
+            edge_records[int(edge_id)] = (int(src), int(dst), int(current_timestamp))
+
+    device = graph.edge_index.device
+    if not edge_records:
+        return (
+            torch.empty((0,), dtype=torch.long, device=device),
+            torch.empty((2, 0), dtype=torch.long, device=device),
+        )
+
+    ordered_edge_ids = sorted(edge_records)
+    edge_ids_global = torch.tensor(ordered_edge_ids, dtype=torch.long, device=device)
+    edge_index_global = torch.tensor(
+        [
+            [edge_records[edge_id][0] for edge_id in ordered_edge_ids],
+            [edge_records[edge_id][1] for edge_id in ordered_edge_ids],
+        ],
+        dtype=torch.long,
+        device=device,
+    )
+    edge_timestamps = torch.tensor(
+        [edge_records[edge_id][2] for edge_id in ordered_edge_ids],
+        dtype=torch.long,
+        device=device,
+    )
+
+    if sampler.max_events is not None and edge_ids_global.numel() > sampler.max_events:
+        time_order = torch.argsort(edge_timestamps, stable=True)
+        edge_ids_global = edge_ids_global[time_order][-sampler.max_events :]
+        edge_index_global = edge_index_global[:, time_order][:, -sampler.max_events :]
+
+    return edge_ids_global, edge_index_global
+
+
+def _expand_stitched_homo_temporal_node_ids(
+    seed_global_ids: torch.Tensor,
+    history_edge_index_global: torch.Tensor,
+    *,
+    fanouts,
+    generator=None,
+) -> torch.Tensor:
+    seed_global_ids = torch.as_tensor(seed_global_ids, dtype=torch.long).view(-1)
+    history_edge_index_global = torch.as_tensor(history_edge_index_global, dtype=torch.long)
+    visited = {int(node) for node in seed_global_ids.tolist()}
+    frontier = torch.tensor(sorted(visited), dtype=torch.long, device=seed_global_ids.device)
+    for fanout in fanouts:
+        if frontier.numel() == 0 or history_edge_index_global.numel() == 0:
+            break
+        frontier_tensor = frontier.to(device=history_edge_index_global.device)
+        incident_mask = torch.isin(history_edge_index_global[0], frontier_tensor) | torch.isin(
+            history_edge_index_global[1], frontier_tensor
+        )
+        if not bool(incident_mask.any()):
+            break
+        candidate_nodes = [
+            int(node)
+            for node in torch.unique(history_edge_index_global[:, incident_mask]).tolist()
+            if int(node) not in visited
+        ]
+        if fanout != -1 and len(candidate_nodes) > int(fanout):
+            permutation = torch.randperm(len(candidate_nodes), generator=generator)[: int(fanout)].tolist()
+            candidate_nodes = [candidate_nodes[index] for index in permutation]
+        frontier = torch.tensor(sorted(candidate_nodes), dtype=torch.long, device=seed_global_ids.device)
+        visited.update(int(node) for node in frontier.tolist())
+    return torch.tensor(sorted(visited), dtype=torch.long, device=seed_global_ids.device)
+
+
+def _induce_stitched_homo_temporal_edges(
+    node_ids_global: torch.Tensor,
+    edge_ids_global: torch.Tensor,
+    edge_index_global: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    node_ids_global = torch.as_tensor(node_ids_global, dtype=torch.long).view(-1)
+    edge_ids_global = torch.as_tensor(edge_ids_global, dtype=torch.long).view(-1)
+    edge_index_global = torch.as_tensor(edge_index_global, dtype=torch.long)
+    if edge_ids_global.numel() == 0 or edge_index_global.numel() == 0:
+        return (
+            torch.empty((0,), dtype=torch.long, device=node_ids_global.device),
+            torch.empty((2, 0), dtype=torch.long, device=node_ids_global.device),
+        )
+    edge_mask = torch.isin(edge_index_global[0], node_ids_global) & torch.isin(edge_index_global[1], node_ids_global)
+    return edge_ids_global[edge_mask], edge_index_global[:, edge_mask]
+
+
 def _build_stitched_homo_link_records(graph, records, stitched_graph: Graph) -> list[LinkPredictionRecord]:
     seed_positions = {int(node_id): index for index, node_id in enumerate(stitched_graph.n_id.tolist())}
     sampled_records = []
@@ -640,9 +867,46 @@ class PlanExecutor:
     @staticmethod
     def _sample_temporal_neighbors(stage: PlanStage, context: MaterializationContext) -> MaterializationContext:
         sampler = stage.params["sampler"]
-        record = sampler._sample_event(stage.params["record"])
+        seed_record = stage.params["record"]
+        graph = seed_record.graph
+        if _match_temporal_partition_shard(graph, context.feature_store) is not None:
+            edge_type = tuple(seed_record.edge_type) if seed_record.edge_type is not None else graph._default_edge_type()
+            seed_local_ids = torch.tensor([int(seed_record.src_index), int(seed_record.dst_index)], dtype=torch.long)
+            seed_global_ids = _graph_node_global_ids(graph, seed_local_ids, node_type="node")
+            history_edge_ids_global, history_edge_index_global = _build_stitched_homo_temporal_history(
+                graph,
+                context.feature_store,
+                sampler,
+                seed_record,
+                edge_type=edge_type,
+            )
+            node_ids_global = _expand_stitched_homo_temporal_node_ids(
+                seed_global_ids,
+                history_edge_index_global,
+                fanouts=sampler.num_neighbors,
+                generator=getattr(sampler, "_generator", None),
+            )
+            edge_ids_global, edge_index_global = _induce_stitched_homo_temporal_edges(
+                node_ids_global,
+                history_edge_ids_global,
+                history_edge_index_global,
+            )
+            stitched_graph = _build_stitched_homo_temporal_graph(
+                graph,
+                context.feature_store,
+                node_ids_global,
+                edge_ids_global,
+                _relabel_stitched_edge_index(node_ids_global, edge_index_global),
+                edge_type=edge_type,
+            )
+            record = _build_stitched_homo_temporal_record(graph, seed_record, stitched_graph)
+        else:
+            record = sampler._sample_event(seed_record)
         context.state["record"] = record
         _store_sampled_graph_indices(context, record.graph)
+        if _match_temporal_partition_shard(graph, context.feature_store) is not None:
+            context.state["node_ids_global"] = context.state["node_ids"]
+            context.state["edge_ids_global"] = context.state["edge_ids"]
         return context
 
     @staticmethod

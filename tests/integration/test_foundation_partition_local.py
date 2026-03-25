@@ -4,11 +4,19 @@ import torch
 from torch import nn
 
 from vgl import Graph
-from vgl.dataloading import DataLoader, LinkNeighborSampler, LinkPredictionRecord, ListDataset, NodeNeighborSampler
+from vgl.dataloading import (
+    DataLoader,
+    LinkNeighborSampler,
+    LinkPredictionRecord,
+    ListDataset,
+    NodeNeighborSampler,
+    TemporalEventRecord,
+    TemporalNeighborSampler,
+)
 from vgl.distributed import LocalGraphShard, LocalSamplingCoordinator
 from vgl.distributed import write_partitioned_graph
 from vgl.engine import Trainer
-from vgl.tasks import LinkPredictionTask, NodeClassificationTask
+from vgl.tasks import LinkPredictionTask, NodeClassificationTask, TemporalEventPredictionTask
 
 
 @dataclass(slots=True)
@@ -377,6 +385,75 @@ def test_local_partition_sampled_training_stitched_sampling_crosses_partition_bo
     trainer = Trainer(
         model=TinyStitchedPartitionNodeClassifier(),
         task=NodeClassificationTask(target="y", split=("train_mask", "val_mask", "test_mask")),
+        optimizer=torch.optim.Adam,
+        lr=1e-2,
+        max_epochs=1,
+    )
+
+    history = trainer.fit(loader)
+
+    assert history["completed_epochs"] == 1
+
+
+
+class TinyStitchedPartitionTemporalPredictor(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.scorer = nn.Linear(3, 2)
+
+    def forward(self, batch):
+        history = batch.history_graph(0)
+        edge_type = next(iter(history.edges))
+        assert torch.equal(batch.timestamp, torch.tensor([4]))
+        assert torch.equal(history.n_id, torch.tensor([0, 1, 2]))
+        assert torch.equal(history.edge_index, torch.tensor([[0, 1], [1, 2]]))
+        assert torch.equal(history.edges[edge_type].timestamp, torch.tensor([1, 3]))
+        assert torch.equal(history.x.view(-1), torch.tensor([0.0, 1.0, 2.0]))
+        assert torch.equal(batch.src_index, torch.tensor([0]))
+        assert torch.equal(batch.dst_index, torch.tensor([1]))
+        src_x = history.x[batch.src_index]
+        dst_x = history.x[batch.dst_index]
+        time_x = batch.timestamp.to(dtype=history.x.dtype).unsqueeze(-1)
+        return self.scorer(torch.cat([src_x, dst_x, time_x], dim=-1))
+
+
+def test_local_partition_sampled_temporal_training_stitched_temporal_sampling_crosses_partition_boundaries(tmp_path):
+    edge_type = ("node", "interacts", "node")
+    graph = Graph.temporal(
+        nodes={"node": {"x": torch.arange(4, dtype=torch.float32).view(4, 1)}},
+        edges={
+            edge_type: {
+                "edge_index": torch.tensor([[0, 1, 2], [1, 2, 3]]),
+                "timestamp": torch.tensor([1, 3, 5]),
+            }
+        },
+        time_attr="timestamp",
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    coordinator = LocalSamplingCoordinator(shards)
+    loader = DataLoader(
+        dataset=ListDataset(
+            [
+                TemporalEventRecord(
+                    graph=shards[0].graph,
+                    src_index=0,
+                    dst_index=1,
+                    timestamp=4,
+                    label=1,
+                )
+            ]
+        ),
+        sampler=TemporalNeighborSampler(num_neighbors=[-1], node_feature_names=("x",)),
+        batch_size=1,
+        feature_store=coordinator,
+    )
+    trainer = Trainer(
+        model=TinyStitchedPartitionTemporalPredictor(),
+        task=TemporalEventPredictionTask(target="label"),
         optimizer=torch.optim.Adam,
         lr=1e-2,
         max_epochs=1,
