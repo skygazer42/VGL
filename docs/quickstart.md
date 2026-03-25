@@ -30,9 +30,11 @@ For advanced systems work, the new foundation layers sit underneath the same sur
 
 - `vgl.sparse` for cached COO/CSR/CSC adjacency layouts, transpose/reduction helpers, and sparse operators
 - `vgl.storage` for feature / graph stores, mmap-backed feature tensors, and `Graph.from_storage(...)` with retained feature-source context
-- `vgl.ops` for reusable graph transforms, homogeneous/heterogeneous relation-local subgraph extraction, and compaction
+- `vgl.ops` for reusable graph transforms, homogeneous/heterogeneous relation-local subgraph extraction, relation-local k-hop expansion, and compaction
 - `vgl.data` for dataset manifests, cache helpers, built-in datasets, and manifest-backed homo/hetero/temporal on-disk datasets with lazy per-item payloads and split views
 - `vgl.distributed` for partition metadata, local shard loading, typed node routing, relation-scoped edge routing, edge feature fetches, partition graph queries, sampling coordination contracts, and routed plan feature sources across homogeneous, temporal homogeneous, single-node-type multi-relation, and multi-node-type heterogeneous graphs
+
+For relation-local heterogeneous graph ops, pass `edge_type=...` and provide bipartite `khop_nodes(...)` seeds as `{node_type: ids}` so the returned node ids stay partitioned by node type and can flow directly into `khop_subgraph(...)`.
 
 The smallest workflow is:
 

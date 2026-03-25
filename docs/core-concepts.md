@@ -14,7 +14,7 @@ Homogeneous graphs can carry edge-level tensors through `Graph.homo(edge_data={.
 
 `Graph.adjacency(layout=...)` is the main bridge back into user code. It builds sparse adjacency views through `vgl.sparse`, including CSC layouts for column-oriented traversals, and caches them on each edge store so repeated structural operations do not need to rebuild the same layout.
 
-`vgl.ops` sits one layer above that and now supports both homogeneous structure rewrites and relation-local heterogeneous `node_subgraph(...)`, `edge_subgraph(...)`, and `compact_nodes(...)` flows when an `edge_type` is selected.
+`vgl.ops` sits one layer above that and now supports both homogeneous structure rewrites and relation-local heterogeneous `node_subgraph(...)`, `edge_subgraph(...)`, `khop_nodes(...)`, `khop_subgraph(...)`, and `compact_nodes(...)` flows when an `edge_type` is selected. For bipartite relations, `khop_nodes(...)` consumes seeds keyed by node type and returns per-type node ids so the resulting `khop_subgraph(...)` can preserve the hetero schema.
 
 ## GraphView
 
