@@ -671,3 +671,89 @@ def test_local_partition_sampled_link_training_stitched_hetero_link_sampling_cro
     history = trainer.fit(loader)
 
     assert history["completed_epochs"] == 1
+
+
+
+class TinyStitchedPartitionHeteroTemporalPredictor(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.scorer = nn.Linear(3, 2)
+
+    def forward(self, batch):
+        history = batch.history_graph(0)
+        assert batch.edge_type == ("author", "writes", "paper")
+        assert batch.src_node_type == "author"
+        assert batch.dst_node_type == "paper"
+        assert torch.equal(batch.timestamp, torch.tensor([4]))
+        assert torch.equal(history.nodes["author"].n_id, torch.tensor([0, 2]))
+        assert torch.equal(history.nodes["paper"].n_id, torch.tensor([0]))
+        assert torch.equal(history.nodes["author"].x.view(-1), torch.tensor([10.0, 30.0]))
+        assert torch.equal(history.nodes["paper"].x.view(-1), torch.tensor([1.0]))
+        assert torch.equal(
+            history.edges[("author", "writes", "paper")].edge_index,
+            torch.tensor([[0, 1], [0, 0]]),
+        )
+        assert torch.equal(
+            history.edges[("author", "writes", "paper")].timestamp,
+            torch.tensor([1, 3]),
+        )
+        assert torch.equal(batch.src_index, torch.tensor([0]))
+        assert torch.equal(batch.dst_index, torch.tensor([0]))
+        src_x = history.nodes["author"].x[batch.src_index]
+        dst_x = history.nodes["paper"].x[batch.dst_index]
+        time_x = batch.timestamp.to(dtype=src_x.dtype).unsqueeze(-1)
+        return self.scorer(torch.cat([src_x, dst_x, time_x], dim=-1))
+
+
+def test_local_partition_sampled_temporal_training_stitched_hetero_temporal_sampling_crosses_partition_boundaries(tmp_path):
+    writes = ("author", "writes", "paper")
+    graph = Graph.temporal(
+        nodes={
+            "author": {"x": torch.tensor([[10.0], [20.0], [30.0]])},
+            "paper": {"x": torch.tensor([[1.0], [2.0]])},
+        },
+        edges={
+            writes: {
+                "edge_index": torch.tensor([[0, 2, 1], [0, 0, 1]]),
+                "timestamp": torch.tensor([1, 3, 6]),
+            }
+        },
+        time_attr="timestamp",
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    coordinator = LocalSamplingCoordinator(shards)
+    loader = DataLoader(
+        dataset=ListDataset(
+            [
+                TemporalEventRecord(
+                    graph=shards[0].graph,
+                    src_index=0,
+                    dst_index=0,
+                    timestamp=4,
+                    label=1,
+                    edge_type=writes,
+                )
+            ]
+        ),
+        sampler=TemporalNeighborSampler(
+            num_neighbors=[-1],
+            node_feature_names={"author": ("x",), "paper": ("x",)},
+        ),
+        batch_size=1,
+        feature_store=coordinator,
+    )
+    trainer = Trainer(
+        model=TinyStitchedPartitionHeteroTemporalPredictor(),
+        task=TemporalEventPredictionTask(target="label"),
+        optimizer=torch.optim.Adam,
+        lr=1e-2,
+        max_epochs=1,
+    )
+
+    history = trainer.fit(loader)
+
+    assert history["completed_epochs"] == 1

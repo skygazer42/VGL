@@ -335,3 +335,68 @@ def test_temporal_neighbor_sampler_prefetch_option_keeps_sampled_shard_global_id
     assert torch.equal(batch.graph.n_id, torch.tensor([2, 3]))
     assert torch.equal(batch.graph.x, torch.tensor([[2.0], [3.0]]))
     assert torch.equal(batch.graph.edges[EDGE_TYPE].edge_weight, torch.tensor([20.0]))
+
+
+
+def test_temporal_neighbor_sampler_stitched_hetero_temporal_sampling_crosses_partition_boundaries_through_coordinator(tmp_path):
+    graph = Graph.temporal(
+        nodes={
+            "author": {"x": torch.tensor([[10.0], [20.0], [30.0]])},
+            "paper": {"x": torch.tensor([[1.0], [2.0]])},
+        },
+        edges={
+            HETERO_EDGE_TYPE: {
+                "edge_index": torch.tensor([[0, 2, 1], [0, 0, 1]]),
+                "timestamp": torch.tensor([1, 3, 6]),
+                "edge_weight": torch.tensor([10.0, 20.0, 30.0]),
+            }
+        },
+        time_attr="timestamp",
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    coordinator = LocalSamplingCoordinator(shards)
+    loader = Loader(
+        dataset=ListDataset(
+            [
+                TemporalEventRecord(
+                    graph=shards[0].graph,
+                    src_index=0,
+                    dst_index=0,
+                    timestamp=4,
+                    label=1,
+                    edge_type=HETERO_EDGE_TYPE,
+                )
+            ]
+        ),
+        sampler=TemporalNeighborSampler(
+            num_neighbors=[-1],
+            node_feature_names={"author": ("x",), "paper": ("x",)},
+            edge_feature_names={HETERO_EDGE_TYPE: ("edge_weight",)},
+        ),
+        batch_size=1,
+        feature_store=coordinator,
+    )
+
+    batch = next(iter(loader))
+
+    assert batch.edge_type == HETERO_EDGE_TYPE
+    assert batch.src_node_type == "author"
+    assert batch.dst_node_type == "paper"
+    assert torch.equal(batch.timestamp, torch.tensor([4]))
+    assert torch.equal(batch.graph.nodes["author"].n_id, torch.tensor([0, 2]))
+    assert torch.equal(batch.graph.nodes["paper"].n_id, torch.tensor([0]))
+    assert torch.equal(batch.graph.nodes["author"].x, torch.tensor([[10.0], [30.0]]))
+    assert torch.equal(batch.graph.nodes["paper"].x, torch.tensor([[1.0]]))
+    assert torch.equal(
+        batch.graph.edges[HETERO_EDGE_TYPE].edge_index,
+        torch.tensor([[0, 1], [0, 0]]),
+    )
+    assert torch.equal(batch.graph.edges[HETERO_EDGE_TYPE].e_id, torch.tensor([0, 1]))
+    assert torch.equal(batch.graph.edges[HETERO_EDGE_TYPE].timestamp, torch.tensor([1, 3]))
+    assert torch.equal(batch.graph.edges[HETERO_EDGE_TYPE].edge_weight, torch.tensor([10.0, 20.0]))
+    assert torch.equal(batch.src_index, torch.tensor([0]))
+    assert torch.equal(batch.dst_index, torch.tensor([0]))
