@@ -337,3 +337,51 @@ def test_local_partition_sampled_training_uses_public_loader_path_for_coordinato
     history = trainer.fit(loader)
 
     assert history["completed_epochs"] == 1
+
+
+
+class TinyStitchedPartitionNodeClassifier(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear = nn.Linear(1, 2)
+
+    def forward(self, batch):
+        assert torch.equal(batch.graph.n_id, torch.tensor([0, 1, 2]))
+        assert torch.equal(batch.graph.edge_index, torch.tensor([[0, 1], [1, 2]]))
+        assert torch.equal(batch.graph.x.view(-1), torch.tensor([0.0, 1.0, 2.0]))
+        assert torch.equal(batch.seed_index, torch.tensor([1]))
+        return self.linear(batch.graph.x)
+
+
+def test_local_partition_sampled_training_stitched_sampling_crosses_partition_boundaries(tmp_path):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]]),
+        x=torch.arange(4, dtype=torch.float32).view(4, 1),
+        y=torch.tensor([0, 1, 0, 1]),
+        train_mask=torch.tensor([True, True, True, True]),
+        val_mask=torch.tensor([True, True, True, True]),
+        test_mask=torch.tensor([True, True, True, True]),
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    coordinator = LocalSamplingCoordinator(shards)
+    loader = DataLoader(
+        dataset=ListDataset([(shards[0].graph, {"seed": 1, "sample_id": "stitched"})]),
+        sampler=NodeNeighborSampler(num_neighbors=[-1]),
+        batch_size=1,
+        feature_store=coordinator,
+    )
+    trainer = Trainer(
+        model=TinyStitchedPartitionNodeClassifier(),
+        task=NodeClassificationTask(target="y", split=("train_mask", "val_mask", "test_mask")),
+        optimizer=torch.optim.Adam,
+        lr=1e-2,
+        max_epochs=1,
+    )
+
+    history = trainer.fit(loader)
+
+    assert history["completed_epochs"] == 1

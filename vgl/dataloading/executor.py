@@ -4,6 +4,8 @@ import torch
 from typing import Any, Callable
 
 from vgl.dataloading.plan import PlanStage, SamplingPlan
+from vgl.dataloading.records import SampleRecord
+from vgl.graph.graph import Graph
 from vgl.storage.base import TensorSlice
 
 StageHandler = Callable[[PlanStage, "MaterializationContext"], "MaterializationContext"]
@@ -127,6 +129,278 @@ def _store_sampled_graph_indices(context: "MaterializationContext", graph) -> No
     }
 
 
+def _is_stitched_homo_candidate(graph, source) -> bool:
+    return (
+        graph is not None
+        and graph.schema.time_attr is None
+        and set(graph.nodes) == {"node"}
+        and len(graph.edges) == 1
+        and source is not None
+        and graph.nodes["node"].data.get("n_id") is not None
+        and all(
+            callable(getattr(source, name, None))
+            for name in (
+                "route_node_ids",
+                "partition_node_ids",
+                "partition_incident_edge_ids",
+                "fetch_partition_incident_edge_index",
+                "fetch_node_features",
+                "fetch_edge_features",
+            )
+        )
+    )
+
+
+def _match_partition_shard(graph, source) -> int | None:
+    if not _is_stitched_homo_candidate(graph, source):
+        return None
+    graph_node_ids = torch.as_tensor(graph.nodes["node"].data["n_id"], dtype=torch.long).view(-1)
+    try:
+        routes = source.route_node_ids(graph_node_ids, node_type="node")
+    except Exception:
+        return None
+    if len(routes) != 1:
+        return None
+    route = routes[0]
+    try:
+        partition_node_ids = torch.as_tensor(
+            source.partition_node_ids(route.partition_id, node_type="node"),
+            dtype=torch.long,
+        ).view(-1)
+    except Exception:
+        return None
+    if partition_node_ids.numel() != graph_node_ids.numel():
+        return None
+    if not torch.equal(torch.sort(partition_node_ids).values, torch.sort(graph_node_ids).values):
+        return None
+    return int(route.partition_id)
+
+
+def _stitched_frontier_candidates(source, frontier_global_ids: torch.Tensor, visited: set[int], *, edge_type) -> list[int]:
+    frontier_global_ids = torch.as_tensor(frontier_global_ids, dtype=torch.long).view(-1)
+    if frontier_global_ids.numel() == 0:
+        return []
+    candidates = set()
+    for route in source.route_node_ids(frontier_global_ids, node_type="node"):
+        edge_index = torch.as_tensor(
+            source.fetch_partition_incident_edge_index(route.partition_id, edge_type=edge_type),
+            dtype=torch.long,
+        )
+        if edge_index.numel() == 0:
+            continue
+        route_ids = route.global_ids.to(dtype=torch.long, device=edge_index.device)
+        incident_mask = torch.isin(edge_index[0], route_ids) | torch.isin(edge_index[1], route_ids)
+        if not incident_mask.any():
+            continue
+        for node in torch.unique(edge_index[:, incident_mask]).tolist():
+            node = int(node)
+            if node not in visited:
+                candidates.add(node)
+    return sorted(candidates)
+
+
+def _expand_stitched_homo_node_ids(graph, source, seed_local_ids: torch.Tensor, *, fanouts) -> tuple[torch.Tensor, torch.Tensor]:
+    seed_local_ids = torch.as_tensor(seed_local_ids, dtype=torch.long).view(-1)
+    seed_global_ids = _graph_node_global_ids(graph, seed_local_ids, node_type="node")
+    visited = {int(node) for node in seed_global_ids.tolist()}
+    frontier = seed_global_ids
+    edge_type = graph._default_edge_type()
+    for fanout in fanouts:
+        candidate_nodes = _stitched_frontier_candidates(source, frontier, visited, edge_type=edge_type)
+        if fanout != -1 and len(candidate_nodes) > int(fanout):
+            permutation = torch.randperm(len(candidate_nodes))[: int(fanout)].tolist()
+            candidate_nodes = [candidate_nodes[index] for index in permutation]
+        frontier = torch.tensor(candidate_nodes, dtype=torch.long, device=seed_global_ids.device)
+        visited.update(int(node) for node in frontier.tolist())
+        if frontier.numel() == 0:
+            break
+    return seed_global_ids, torch.tensor(sorted(visited), dtype=torch.long, device=seed_global_ids.device)
+
+
+def _collect_stitched_homo_edges(source, node_ids_global: torch.Tensor, *, edge_type) -> tuple[torch.Tensor, torch.Tensor]:
+    node_ids_global = torch.as_tensor(node_ids_global, dtype=torch.long).view(-1)
+    visited = {int(node) for node in node_ids_global.tolist()}
+    edge_records: dict[int, tuple[int, int]] = {}
+    for route in source.route_node_ids(node_ids_global, node_type="node"):
+        edge_ids = torch.as_tensor(
+            source.partition_incident_edge_ids(route.partition_id, edge_type=edge_type),
+            dtype=torch.long,
+        ).view(-1)
+        edge_index = torch.as_tensor(
+            source.fetch_partition_incident_edge_index(route.partition_id, edge_type=edge_type),
+            dtype=torch.long,
+        )
+        if edge_ids.numel() == 0 or edge_index.numel() == 0:
+            continue
+        route_ids = route.global_ids.to(dtype=torch.long, device=edge_index.device)
+        incident_mask = torch.isin(edge_index[0], route_ids) | torch.isin(edge_index[1], route_ids)
+        if not incident_mask.any():
+            continue
+        current_edge_ids = edge_ids[incident_mask]
+        current_edge_index = edge_index[:, incident_mask]
+        for edge_id, src, dst in zip(
+            current_edge_ids.tolist(),
+            current_edge_index[0].tolist(),
+            current_edge_index[1].tolist(),
+        ):
+            src = int(src)
+            dst = int(dst)
+            if src in visited and dst in visited:
+                edge_records[int(edge_id)] = (src, dst)
+    if not edge_records:
+        return (
+            torch.empty((0,), dtype=torch.long, device=node_ids_global.device),
+            torch.empty((2, 0), dtype=torch.long, device=node_ids_global.device),
+        )
+    ordered_edge_ids = sorted(edge_records)
+    edge_ids_global = torch.tensor(ordered_edge_ids, dtype=torch.long, device=node_ids_global.device)
+    edge_index_global = torch.tensor(
+        [
+            [edge_records[edge_id][0] for edge_id in ordered_edge_ids],
+            [edge_records[edge_id][1] for edge_id in ordered_edge_ids],
+        ],
+        dtype=torch.long,
+        device=node_ids_global.device,
+    )
+    return edge_ids_global, edge_index_global
+
+
+def _relabel_stitched_edge_index(node_ids_global: torch.Tensor, edge_index_global: torch.Tensor) -> torch.Tensor:
+    node_ids_global = torch.as_tensor(node_ids_global, dtype=torch.long).view(-1)
+    edge_index_global = torch.as_tensor(edge_index_global, dtype=torch.long)
+    if edge_index_global.numel() == 0:
+        return torch.empty((2, 0), dtype=torch.long, device=node_ids_global.device)
+    positions = {int(node_id): index for index, node_id in enumerate(node_ids_global.tolist())}
+    return torch.tensor(
+        [
+            [positions[int(node_id)] for node_id in edge_index_global[0].tolist()],
+            [positions[int(node_id)] for node_id in edge_index_global[1].tolist()],
+        ],
+        dtype=torch.long,
+        device=node_ids_global.device,
+    )
+
+
+def _fetch_stitched_homo_node_data(graph, source, node_ids_global: torch.Tensor) -> dict[str, Any]:
+    node_ids_global = torch.as_tensor(node_ids_global, dtype=torch.long).view(-1)
+    node_store = graph.nodes["node"]
+    node_count = graph._node_count("node")
+    node_data = {"n_id": node_ids_global}
+    for key, value in node_store.data.items():
+        if key == "n_id":
+            continue
+        if isinstance(value, torch.Tensor) and value.ndim > 0 and value.size(0) == node_count:
+            node_data[key] = source.fetch_node_features(("node", "node", key), node_ids_global).values
+        else:
+            node_data[key] = value
+    return node_data
+
+
+def _fetch_stitched_homo_edge_feature(graph, source, edge_ids_global: torch.Tensor, *, edge_type, feature_name: str) -> torch.Tensor:
+    edge_ids_global = torch.as_tensor(edge_ids_global, dtype=torch.long).view(-1)
+    edge_store = graph.edges[tuple(edge_type)]
+    template = edge_store.data[feature_name]
+    if edge_ids_global.numel() == 0:
+        return template.new_empty((0,) + tuple(template.shape[1:]))
+    try:
+        return source.fetch_edge_features(("edge", tuple(edge_type), feature_name), edge_ids_global).values
+    except KeyError:
+        shards = getattr(source, "shards", None)
+        if not isinstance(shards, dict):
+            raise
+
+    values = template.new_empty((edge_ids_global.numel(),) + tuple(template.shape[1:]))
+    remaining = {int(edge_id): index for index, edge_id in enumerate(edge_ids_global.tolist())}
+    for shard in shards.values():
+        local_feature = shard.graph.edges[tuple(edge_type)].data.get(feature_name)
+        local_edge_ids = shard.edge_ids(edge_type=edge_type)
+        if isinstance(local_feature, torch.Tensor) and local_feature.ndim > 0 and local_feature.size(0) == local_edge_ids.numel():
+            for current_index, edge_id in enumerate(local_edge_ids.tolist()):
+                target_index = remaining.pop(int(edge_id), None)
+                if target_index is None:
+                    continue
+                values[target_index] = local_feature[current_index]
+
+        boundary_data = shard.boundary_edge_data_by_type.get(tuple(edge_type), {})
+        boundary_feature = boundary_data.get(feature_name)
+        boundary_edge_ids = torch.as_tensor(boundary_data.get("e_id", torch.empty((0,), dtype=torch.long)), dtype=torch.long).view(-1)
+        if isinstance(boundary_feature, torch.Tensor) and boundary_feature.ndim > 0 and boundary_feature.size(0) == boundary_edge_ids.numel():
+            for current_index, edge_id in enumerate(boundary_edge_ids.tolist()):
+                target_index = remaining.pop(int(edge_id), None)
+                if target_index is None:
+                    continue
+                values[target_index] = boundary_feature[current_index]
+        if not remaining:
+            break
+
+    if remaining:
+        missing = ", ".join(str(edge_id) for edge_id in sorted(remaining))
+        raise KeyError(f"missing stitched edge feature {feature_name!r} for edge ids: {missing}")
+    return values
+
+
+def _fetch_stitched_homo_edge_data(graph, source, edge_ids_global: torch.Tensor, *, edge_type) -> dict[str, Any]:
+    edge_ids_global = torch.as_tensor(edge_ids_global, dtype=torch.long).view(-1)
+    edge_store = graph.edges[tuple(edge_type)]
+    edge_count = int(edge_store.edge_index.size(1))
+    edge_data = {"e_id": edge_ids_global}
+    for key, value in edge_store.data.items():
+        if key in {"edge_index", "e_id"}:
+            continue
+        if isinstance(value, torch.Tensor) and value.ndim > 0 and value.size(0) == edge_count:
+            edge_data[key] = _fetch_stitched_homo_edge_feature(
+                graph,
+                source,
+                edge_ids_global,
+                edge_type=edge_type,
+                feature_name=key,
+            )
+        else:
+            edge_data[key] = value
+    return edge_data
+
+
+def _build_stitched_homo_graph(graph, source, node_ids_global: torch.Tensor, edge_ids_global: torch.Tensor, edge_index: torch.Tensor) -> Graph:
+    stitched_graph = Graph.homo(
+        edge_index=edge_index,
+        edge_data=_fetch_stitched_homo_edge_data(graph, source, edge_ids_global, edge_type=graph._default_edge_type()),
+        **_fetch_stitched_homo_node_data(graph, source, node_ids_global),
+    )
+    stitched_graph.feature_store = source
+    return stitched_graph
+
+
+def _build_stitched_node_samples(
+    context: "MaterializationContext",
+    stitched_graph: Graph,
+    seed_local_ids: torch.Tensor,
+    seed_global_ids: torch.Tensor,
+):
+    metadata = dict(getattr(context.request, "metadata", {}))
+    sample_id = context.metadata.get("sample_id", metadata.get("sample_id"))
+    source_graph_id = context.metadata.get("source_graph_id", metadata.get("source_graph_id"))
+    seed_positions = {int(node_id): index for index, node_id in enumerate(stitched_graph.n_id.tolist())}
+    samples = []
+    for seed_local, seed_global in zip(
+        torch.as_tensor(seed_local_ids, dtype=torch.long).view(-1).tolist(),
+        torch.as_tensor(seed_global_ids, dtype=torch.long).view(-1).tolist(),
+    ):
+        sample_metadata = dict(metadata)
+        sample_metadata["seed"] = int(seed_local)
+        samples.append(
+            SampleRecord(
+                graph=stitched_graph,
+                metadata=sample_metadata,
+                sample_id=sample_id,
+                source_graph_id=source_graph_id,
+                subgraph_seed=seed_positions[int(seed_global)],
+            )
+        )
+    if len(samples) == 1:
+        return samples[0]
+    return samples
+
+
 @dataclass(slots=True)
 class MaterializationContext:
     request: Any
@@ -179,6 +453,39 @@ class PlanExecutor:
         if context.graph is None:
             raise ValueError("graph is required for neighbor expansion stages")
         request = context.request
+
+        if _match_partition_shard(context.graph, context.feature_store) is not None:
+            seed_local_ids = torch.as_tensor(request.node_ids, dtype=torch.long).view(-1)
+            seed_global_ids, node_ids_global = _expand_stitched_homo_node_ids(
+                context.graph,
+                context.feature_store,
+                seed_local_ids,
+                fanouts=stage.params["num_neighbors"],
+            )
+            edge_ids_global, edge_index_global = _collect_stitched_homo_edges(
+                context.feature_store,
+                node_ids_global,
+                edge_type=context.graph._default_edge_type(),
+            )
+            stitched_graph = _build_stitched_homo_graph(
+                context.graph,
+                context.feature_store,
+                node_ids_global,
+                edge_ids_global,
+                _relabel_stitched_edge_index(node_ids_global, edge_index_global),
+            )
+            context.state["sample"] = _build_stitched_node_samples(
+                context,
+                stitched_graph,
+                seed_local_ids,
+                seed_global_ids,
+            )
+            context.state["graph"] = stitched_graph
+            _store_sampled_graph_indices(context, stitched_graph)
+            context.state["node_ids_global"] = context.state["node_ids"]
+            context.state["edge_ids_global"] = context.state["edge_ids"]
+            return context
+
         expanded = expand_neighbors(
             context.graph,
             request.node_ids,

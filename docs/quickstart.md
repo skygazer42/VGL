@@ -32,7 +32,7 @@ For advanced systems work, the new foundation layers sit underneath the same sur
 - `vgl.storage` for feature / graph stores, mmap-backed feature tensors, and `Graph.from_storage(...)` with retained feature-source context
 - `vgl.ops` for reusable graph transforms, homogeneous/heterogeneous relation-local subgraph extraction, relation-local k-hop expansion, and compaction
 - `vgl.data` for dataset manifests, cache helpers, built-in datasets, and manifest-backed homo/hetero/temporal on-disk datasets with lazy per-item payloads and split views
-- `vgl.distributed` for partition metadata, local shard loading, typed node routing, relation-scoped edge routing, edge feature fetches, owned-local plus boundary/incident partition queries, sampling coordination contracts, and routed plan feature sources across homogeneous, temporal homogeneous, single-node-type multi-relation, and multi-node-type heterogeneous graphs
+- `vgl.distributed` for partition metadata, local shard loading, typed node routing, relation-scoped edge routing, edge feature fetches, owned-local plus boundary/incident partition queries, stitched homogeneous node sampling across shard boundaries, sampling coordination contracts, and routed plan feature sources across homogeneous, temporal homogeneous, single-node-type multi-relation, and multi-node-type heterogeneous graphs
 
 For relation-local heterogeneous graph ops, pass `edge_type=...` and provide bipartite `khop_nodes(...)` seeds as `{node_type: ids}` so the returned node ids stay partitioned by node type and can flow directly into `khop_subgraph(...)`.
 
@@ -318,6 +318,17 @@ incident_edge_index = coordinator.fetch_partition_incident_edge_index(0, edge_ty
 partition_adjacency = coordinator.fetch_partition_adjacency(0, edge_type=("node", "follows", "node"), layout="csr")
 ```
 
-Plan-backed feature fetch stages can also use the same routed source directly through `PlanExecutor.execute(..., feature_store=coordinator)` or `Loader(..., feature_store=coordinator)` when you want executor-driven feature access instead of direct store access. Those explicit arguments remain the highest-priority override; otherwise, storage-backed graphs can supply the same context through their retained `graph.feature_store`. When the source graph is a shard-local `shard.graph`, the runtime still samples structure in local id space but automatically resolves routed node and edge feature fetch through the graph's global `n_id` / `e_id` fields. Once node, link, or temporal sampling opts into those stages, the fetched node and edge tensors are aligned to the sampled subgraph and exposed through `batch.graph` like ordinary in-graph features.
+Plan-backed feature fetch stages can also use the same routed source directly through `PlanExecutor.execute(..., feature_store=coordinator)` or `Loader(..., feature_store=coordinator)` when you want executor-driven feature access instead of direct store access. Those explicit arguments remain the highest-priority override; otherwise, storage-backed graphs can supply the same context through their retained `graph.feature_store`. When the source graph is a shard-local homogeneous `shard.graph`, `NodeNeighborSampler` can now use coordinator incident-edge queries to stitch remote frontier nodes and edges into the sampled subgraph while keeping node and edge tensors aligned through global `n_id` / `e_id`. Heterogeneous, link, and temporal samplers still use local structure plus routed feature fetch only.
+
+```python
+loader = DataLoader(
+    dataset=ListDataset([(shard.graph, {"seed": 1, "sample_id": "part0"})]),
+    sampler=NodeNeighborSampler(num_neighbors=[-1, -1]),
+    batch_size=1,
+    feature_store=coordinator,
+)
+batch = next(iter(loader))
+# batch.graph.n_id now contains both local and remote frontier nodes
+```
 
 These advanced paths are still designed to terminate in the same public training contracts: `Graph`, batch objects from `Loader`, and `Trainer.fit/evaluate/test`.

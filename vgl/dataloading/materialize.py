@@ -232,7 +232,7 @@ def _materialize_record_payload(context: MaterializationContext, payload):
 
 def _node_context_to_sample(context: MaterializationContext) -> SampleRecord | list[SampleRecord]:
     if "sample" in context.state:
-        return context.state["sample"]
+        return _materialize_record_payload(context, context.state["sample"])
     if context.graph is None:
         raise ValueError("node context requires graph for materialization")
     request = context.request
