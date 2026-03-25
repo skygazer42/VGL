@@ -287,3 +287,53 @@ def test_local_hetero_partition_edge_feature_routing_round_trips_across_shards(t
     assert torch.equal(cites_features.values, torch.tensor([0.4, 0.1]))
     assert torch.equal(partition_writes, torch.tensor([2, 3]))
     assert torch.equal(partition_writes_index, torch.tensor([[2, 3], [3, 2]]))
+
+
+
+class TinyCoordinatorFeatureAlignedNodeClassifier(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear = nn.Linear(1, 2)
+
+    def forward(self, batch):
+        assert torch.equal(batch.graph.x.view(-1), batch.graph.n_id.to(dtype=batch.graph.x.dtype))
+        return self.linear(batch.graph.x)
+
+
+def test_local_partition_sampled_training_uses_public_loader_path_for_coordinator_feature_fetch(tmp_path):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 2], [1, 3]]),
+        x=torch.arange(4, dtype=torch.float32).view(4, 1),
+        y=torch.tensor([0, 1, 0, 1]),
+        train_mask=torch.tensor([True, True, True, True]),
+        val_mask=torch.tensor([True, True, True, True]),
+        test_mask=torch.tensor([True, True, True, True]),
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    coordinator = LocalSamplingCoordinator(shards)
+    loader = DataLoader(
+        dataset=ListDataset(
+            [
+                (shards[0].graph, {"seed": 0, "sample_id": "part0"}),
+                (shards[1].graph, {"seed": 1, "sample_id": "part1"}),
+            ]
+        ),
+        sampler=NodeNeighborSampler(num_neighbors=[-1], node_feature_names=("x",)),
+        batch_size=2,
+        feature_store=coordinator,
+    )
+    trainer = Trainer(
+        model=TinyCoordinatorFeatureAlignedNodeClassifier(),
+        task=NodeClassificationTask(target="y", split=("train_mask", "val_mask", "test_mask")),
+        optimizer=torch.optim.Adam,
+        lr=1e-2,
+        max_epochs=1,
+    )
+
+    history = trainer.fit(loader)
+
+    assert history["completed_epochs"] == 1
