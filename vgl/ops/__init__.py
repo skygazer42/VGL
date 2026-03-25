@@ -1,6 +1,8 @@
 from vgl.ops.compact import compact_nodes as compact_nodes
 from vgl.ops.khop import khop_nodes as khop_nodes
 from vgl.ops.khop import khop_subgraph as khop_subgraph
+from vgl.ops.path import line_graph as line_graph
+from vgl.ops.path import metapath_reachable_graph as metapath_reachable_graph
 from vgl.ops.pipeline import GraphTransform as GraphTransform
 from vgl.ops.pipeline import TransformPipeline as TransformPipeline
 from vgl.ops.structure import add_self_loops as add_self_loops
@@ -15,6 +17,8 @@ __all__ = [
     "add_self_loops",
     "remove_self_loops",
     "to_bidirected",
+    "line_graph",
+    "metapath_reachable_graph",
     "node_subgraph",
     "edge_subgraph",
     "khop_nodes",

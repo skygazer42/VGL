@@ -1,0 +1,110 @@
+import pytest
+import torch
+
+from vgl import Graph
+from vgl.ops import line_graph, metapath_reachable_graph
+
+
+def test_line_graph_turns_edges_into_nodes_and_connects_composable_edges():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 1], [1, 2, 0]]),
+        x=torch.tensor([[1.0], [2.0], [3.0]]),
+    )
+
+    transformed = line_graph(graph, copy_edata=False)
+
+    assert torch.equal(transformed.n_id, torch.tensor([0, 1, 2]))
+    assert torch.equal(transformed.edge_index, torch.tensor([[0, 0, 2], [1, 2, 0]]))
+
+
+def test_line_graph_can_drop_immediate_backtracking_pairs():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 1], [1, 0, 2]]),
+        x=torch.tensor([[1.0], [2.0], [3.0]]),
+    )
+
+    transformed = line_graph(graph, backtracking=False, copy_edata=False)
+
+    assert torch.equal(transformed.edge_index, torch.tensor([[0], [2]]))
+
+
+def test_line_graph_copy_edata_promotes_edge_tensors_to_node_features():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1], [1, 2]]),
+        edge_data={
+            "weight": torch.tensor([1.5, 2.5]),
+            "timestamp": torch.tensor([4, 7]),
+        },
+        x=torch.tensor([[1.0], [2.0], [3.0]]),
+    )
+
+    transformed = line_graph(graph, copy_edata=True)
+
+    assert torch.equal(transformed.n_id, torch.tensor([0, 1]))
+    assert torch.equal(transformed.weight, torch.tensor([1.5, 2.5]))
+    assert torch.equal(transformed.timestamp, torch.tensor([4, 7]))
+
+
+def test_metapath_reachable_graph_deduplicates_hetero_reachable_pairs():
+    writes = ("author", "writes", "paper")
+    published_in = ("paper", "published_in", "venue")
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.tensor([[1.0], [2.0]])},
+            "paper": {"x": torch.tensor([[10.0], [20.0]])},
+            "venue": {"x": torch.tensor([[100.0]])},
+        },
+        edges={
+            writes: {"edge_index": torch.tensor([[0, 0, 1], [0, 1, 1]])},
+            published_in: {"edge_index": torch.tensor([[0, 1], [0, 0]])},
+        },
+    )
+
+    transformed = metapath_reachable_graph(graph, [writes, published_in])
+    edge_type = ("author", "writes__published_in", "venue")
+
+    assert set(transformed.nodes) == {"author", "venue"}
+    assert set(transformed.edges) == {edge_type}
+    assert torch.equal(transformed.nodes["author"].x, graph.nodes["author"].x)
+    assert torch.equal(transformed.nodes["venue"].x, graph.nodes["venue"].x)
+    assert torch.equal(transformed.edges[edge_type].edge_index, torch.tensor([[0, 1], [0, 0]]))
+
+
+def test_metapath_reachable_graph_supports_single_node_type_multi_relation():
+    follows = ("node", "follows", "node")
+    likes = ("node", "likes", "node")
+    graph = Graph.hetero(
+        nodes={"node": {"x": torch.tensor([[0.0], [1.0], [2.0], [3.0]])}},
+        edges={
+            follows: {"edge_index": torch.tensor([[0, 1], [1, 2]])},
+            likes: {"edge_index": torch.tensor([[1, 2], [3, 0]])},
+        },
+    )
+
+    transformed = metapath_reachable_graph(graph, [follows, likes])
+    edge_type = ("node", "follows__likes", "node")
+
+    assert set(transformed.nodes) == {"node"}
+    assert set(transformed.edges) == {edge_type}
+    assert torch.equal(transformed.nodes["node"].x, graph.nodes["node"].x)
+    assert torch.equal(transformed.edges[edge_type].edge_index, torch.tensor([[0, 1], [3, 0]]))
+
+
+def test_metapath_reachable_graph_rejects_non_composable_edge_types():
+    writes = ("author", "writes", "paper")
+    hosted_by = ("venue", "hosted_by", "conference")
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.tensor([[1.0]])},
+            "paper": {"x": torch.tensor([[2.0]])},
+            "venue": {"x": torch.tensor([[3.0]])},
+            "conference": {"x": torch.tensor([[4.0]])},
+        },
+        edges={
+            writes: {"edge_index": torch.tensor([[0], [0]])},
+            hosted_by: {"edge_index": torch.tensor([[0], [0]])},
+        },
+    )
+
+    with pytest.raises(ValueError, match="compose"):
+        metapath_reachable_graph(graph, [writes, hosted_by])

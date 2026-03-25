@@ -173,6 +173,16 @@ class Graph:
 
         return to_bidirected(self, edge_type=edge_type)
 
+    def line_graph(self, *, edge_type=None, backtracking: bool = True, copy_edata: bool = True):
+        from vgl.ops import line_graph
+
+        return line_graph(self, edge_type=edge_type, backtracking=backtracking, copy_edata=copy_edata)
+
+    def metapath_reachable_graph(self, metapath, *, relation_name=None):
+        from vgl.ops import metapath_reachable_graph
+
+        return metapath_reachable_graph(self, metapath, relation_name=relation_name)
+
     def node_subgraph(self, node_ids, *, edge_type=None):
         from vgl.ops import node_subgraph
 
