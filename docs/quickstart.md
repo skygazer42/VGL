@@ -235,6 +235,7 @@ trainer = Trainer(model=model, task=task, optimizer=torch.optim.Adam, lr=1e-3, m
 trainer.fit(loader)
 ```
 
+When `graph` has multiple relations or node types, pass `edge_type=` on each `TemporalEventRecord`, for example `TemporalEventRecord(..., edge_type=('author', 'writes', 'paper'))`. In sampled loaders, `TemporalNeighborSampler` keeps strict-history extraction relation-local and `TemporalEventBatch` exposes `edge_type`, `edge_types`, `edge_type_index`, `src_node_type`, and `dst_node_type` for typed temporal models.
 
 ## Advanced Foundation Workflows
 

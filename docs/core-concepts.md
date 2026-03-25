@@ -96,6 +96,7 @@ This keeps the user-facing API stable while opening a path toward larger-graph r
 - `dst_index`
 - `timestamp`
 - `label`
+- optional `edge_type` when the temporal graph has multiple relations or node types
 
 `TemporalEventBatch` collates these records into one model input while keeping temporal supervision explicit through:
 
@@ -104,6 +105,10 @@ This keeps the user-facing API stable while opening a path toward larger-graph r
 - `dst_index`
 - `timestamp`
 - `labels`
+- `edge_types` and `edge_type_index` for per-event typed temporal supervision
+- `edge_type`, `src_node_type`, and `dst_node_type` when all records share one relation
+
+`TemporalNeighborSampler` preserves the same contract for sampled batches. On typed heterogeneous temporal graphs it extracts strict-history subgraphs relation-locally, keeps the sampled records' `edge_type`, and aligns feature materialization through per-type node and edge ids before overlaying those tensors back onto the sampled graph.
 
 ## Readout
 

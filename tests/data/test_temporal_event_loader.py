@@ -91,3 +91,73 @@ def test_loader_can_build_temporal_event_batches_from_temporal_neighbor_sampler(
 
     assert torch.equal(batch.timestamp, torch.tensor([3, 6]))
     assert batch.graph.x.size(0) == 6
+
+HETERO_EDGE_TYPE = ("author", "writes", "paper")
+
+
+def _hetero_temporal_graph():
+    return Graph.temporal(
+        nodes={
+            "author": {"x": torch.randn(2, 4)},
+            "paper": {"x": torch.randn(3, 4)},
+        },
+        edges={
+            HETERO_EDGE_TYPE: {
+                "edge_index": torch.tensor([[0, 1], [1, 2]]),
+                "timestamp": torch.tensor([1, 4]),
+            }
+        },
+        time_attr="timestamp",
+    )
+
+
+def test_loader_collates_typed_hetero_temporal_event_records():
+    graph = _hetero_temporal_graph()
+    dataset = ListDataset(
+        [
+            TemporalEventRecord(graph=graph, src_index=0, dst_index=1, timestamp=1, label=1, edge_type=HETERO_EDGE_TYPE),
+            TemporalEventRecord(graph=graph, src_index=1, dst_index=2, timestamp=4, label=0, edge_type=HETERO_EDGE_TYPE),
+        ]
+    )
+    loader = Loader(dataset=dataset, sampler=FullGraphSampler(), batch_size=2)
+
+    batch = next(iter(loader))
+
+    assert batch.edge_type == HETERO_EDGE_TYPE
+    assert batch.src_node_type == "author"
+    assert batch.dst_node_type == "paper"
+    assert torch.equal(batch.edge_type_index, torch.tensor([0, 0]))
+    assert torch.equal(batch.src_index, torch.tensor([0, 1]))
+    assert torch.equal(batch.dst_index, torch.tensor([1, 2]))
+
+
+def test_loader_can_build_typed_temporal_event_batches_from_temporal_neighbor_sampler():
+    graph = Graph.temporal(
+        nodes={
+            "author": {"x": torch.randn(2, 4)},
+            "paper": {"x": torch.randn(3, 4)},
+        },
+        edges={
+            HETERO_EDGE_TYPE: {
+                "edge_index": torch.tensor([[0, 1, 1], [1, 0, 2]]),
+                "timestamp": torch.tensor([1, 4, 6]),
+            }
+        },
+        time_attr="timestamp",
+    )
+    dataset = ListDataset(
+        [
+            TemporalEventRecord(graph=graph, src_index=1, dst_index=2, timestamp=5, label=1, edge_type=HETERO_EDGE_TYPE),
+            TemporalEventRecord(graph=graph, src_index=0, dst_index=1, timestamp=2, label=0, edge_type=HETERO_EDGE_TYPE),
+        ]
+    )
+    loader = Loader(dataset=dataset, sampler=TemporalNeighborSampler(num_neighbors=[-1]), batch_size=2)
+
+    batch = next(iter(loader))
+
+    assert batch.edge_type == HETERO_EDGE_TYPE
+    assert batch.src_node_type == "author"
+    assert batch.dst_node_type == "paper"
+    assert torch.equal(batch.edge_type_index, torch.tensor([0, 0]))
+    assert torch.equal(batch.timestamp, torch.tensor([5, 2]))
+

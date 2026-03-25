@@ -321,3 +321,94 @@ def test_temporal_event_batch_pin_memory_pins_all_transfer_fields():
     assert pinned.event_features.is_pinned()
     assert pinned.metadata is batch.metadata
     assert not batch.src_index.is_pinned()
+
+
+def test_temporal_event_batch_to_moves_typed_temporal_fields():
+    edge_type = ("author", "writes", "paper")
+    graph = Graph.temporal(
+        nodes={
+            "author": {"x": torch.randn(2, 4)},
+            "paper": {"x": torch.randn(3, 4)},
+        },
+        edges={
+            edge_type: {
+                "edge_index": torch.tensor([[0, 1], [1, 2]]),
+                "timestamp": torch.tensor([1, 4]),
+            }
+        },
+        time_attr="timestamp",
+    )
+    metadata = [{"event_id": "te0"}, {"event_id": "te1"}]
+    batch = TemporalEventBatch(
+        graph=graph,
+        src_index=torch.tensor([0, 1], dtype=torch.long),
+        dst_index=torch.tensor([1, 2], dtype=torch.long),
+        timestamp=torch.tensor([1.0, 4.0], dtype=torch.float32),
+        labels=torch.tensor([1.0, 0.0], dtype=torch.float32),
+        event_features=torch.tensor([[1.0, 0.0], [0.0, 1.0]], dtype=torch.float32),
+        edge_types=(edge_type,),
+        edge_type_index=torch.tensor([0, 0], dtype=torch.long),
+        edge_type=edge_type,
+        src_node_type="author",
+        dst_node_type="paper",
+        metadata=metadata,
+    )
+
+    moved = batch.to(device=_transfer_device(), dtype=torch.float64)
+
+    assert moved is not batch
+    assert moved.graph.nodes["author"].x.device.type == "meta"
+    assert moved.graph.nodes["author"].x.dtype == torch.float64
+    assert moved.src_index.device.type == "meta"
+    assert moved.dst_index.device.type == "meta"
+    assert moved.edge_type_index is not None
+    assert moved.edge_type_index.device.type == "meta"
+    assert moved.edge_type_index.dtype == torch.long
+    assert moved.edge_types == (edge_type,)
+    assert moved.edge_type == edge_type
+    assert moved.src_node_type == "author"
+    assert moved.dst_node_type == "paper"
+    assert moved.metadata is metadata
+
+
+def test_temporal_event_batch_pin_memory_pins_typed_temporal_fields():
+    edge_type = ("author", "writes", "paper")
+    batch = TemporalEventBatch(
+        graph=Graph.temporal(
+            nodes={
+                "author": {"x": torch.randn(2, 4)},
+                "paper": {"x": torch.randn(3, 4)},
+            },
+            edges={
+                edge_type: {
+                    "edge_index": torch.tensor([[0, 1], [1, 2]]),
+                    "timestamp": torch.tensor([1, 4]),
+                }
+            },
+            time_attr="timestamp",
+        ),
+        src_index=torch.tensor([0, 1], dtype=torch.long),
+        dst_index=torch.tensor([1, 2], dtype=torch.long),
+        timestamp=torch.tensor([1.0, 4.0], dtype=torch.float32),
+        labels=torch.tensor([1.0, 0.0], dtype=torch.float32),
+        event_features=torch.tensor([[1.0, 0.0], [0.0, 1.0]], dtype=torch.float32),
+        edge_types=(edge_type,),
+        edge_type_index=torch.tensor([0, 0], dtype=torch.long),
+        edge_type=edge_type,
+        src_node_type="author",
+        dst_node_type="paper",
+        metadata=[{"event_id": "te0"}, {"event_id": "te1"}],
+    )
+
+    pinned = batch.pin_memory()
+
+    assert pinned is not batch
+    assert pinned.graph.nodes["author"].x.is_pinned()
+    assert pinned.src_index.is_pinned()
+    assert pinned.dst_index.is_pinned()
+    assert pinned.edge_type_index is not None
+    assert pinned.edge_type_index.is_pinned()
+    assert pinned.edge_type == edge_type
+    assert pinned.src_node_type == "author"
+    assert pinned.dst_node_type == "paper"
+

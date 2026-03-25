@@ -110,6 +110,21 @@ def _resolve_link_reverse_edge_type(record):
     return tuple(reverse_edge_type)
 
 
+def _resolve_temporal_edge_type(record):
+    edge_type = getattr(record, "edge_type", None)
+    if edge_type is None:
+        edge_type = record.metadata.get("edge_type")
+    if edge_type is not None:
+        return tuple(edge_type)
+    graph = record.graph
+    if len(graph.edges) == 1:
+        return next(iter(graph.edges))
+    try:
+        return graph._default_edge_type()
+    except AttributeError as exc:
+        raise ValueError("Temporal event prediction on heterogeneous graphs requires edge_type") from exc
+
+
 def _batch_homo_graphs(graphs, *, context):
     if len(graphs) == 1:
         return graphs[0], {id(graphs[0]): 0}
@@ -117,10 +132,16 @@ def _batch_homo_graphs(graphs, *, context):
         raise ValueError(f"{context} batching multiple graphs currently supports homogeneous graphs only")
 
     first_graph = graphs[0]
+    edge_type = first_graph._default_edge_type()
+    time_attr = first_graph.schema.time_attr
     node_keys = tuple(first_graph.nodes["node"].data.keys())
-    edge_store = first_graph.edges[first_graph._default_edge_type()]
+    edge_store = first_graph.edges[edge_type]
     edge_keys = tuple(edge_store.data.keys())
     for graph in graphs[1:]:
+        if graph._default_edge_type() != edge_type:
+            raise ValueError(f"{context} requires matching edge types when batching multiple graphs")
+        if graph.schema.time_attr != time_attr:
+            raise ValueError(f"{context} requires matching time_attr when batching multiple graphs")
         if tuple(graph.nodes["node"].data.keys()) != node_keys:
             raise ValueError(f"{context} requires matching node feature keys when batching multiple graphs")
         if tuple(graph.edges[graph._default_edge_type()].data.keys()) != edge_keys:
@@ -157,7 +178,16 @@ def _batch_homo_graphs(graphs, *, context):
     batched_node_data = {key: torch.cat(values, dim=0) for key, values in node_data.items()}
     batched_edge_data = {key: torch.cat(values, dim=0) for key, values in edge_data.items()}
     batched_edge_index = torch.cat(edge_indices, dim=1)
-    return Graph.homo(edge_index=batched_edge_index, edge_data=batched_edge_data, **batched_node_data), graph_offsets
+    if edge_type == ("node", "to", "node") and time_attr is None:
+        batched_graph = Graph.homo(edge_index=batched_edge_index, edge_data=batched_edge_data, **batched_node_data)
+    else:
+        nodes = {"node": batched_node_data}
+        edges = {edge_type: {"edge_index": batched_edge_index, **batched_edge_data}}
+        if time_attr is None:
+            batched_graph = Graph.hetero(nodes=nodes, edges=edges)
+        else:
+            batched_graph = Graph.temporal(nodes=nodes, edges=edges, time_attr=time_attr)
+    return batched_graph, graph_offsets
 
 
 def _batch_hetero_graphs(graphs, *, context):
@@ -720,6 +750,11 @@ class TemporalEventBatch:
     timestamp: torch.Tensor
     labels: torch.Tensor
     event_features: torch.Tensor | None = None
+    edge_types: tuple[tuple[str, str, str], ...] | None = None
+    edge_type_index: torch.Tensor | None = None
+    edge_type: tuple[str, str, str] | None = None
+    src_node_type: str | None = None
+    dst_node_type: str | None = None
     metadata: list[dict] | None = None
 
     @classmethod
@@ -732,22 +767,50 @@ class TemporalEventBatch:
         if any(record.graph.schema.time_attr is None for record in records):
             raise ValueError("TemporalEventBatch requires a temporal graph with schema.time_attr")
         graphs = _unique_graphs(records)
-        graph, graph_offsets = _batch_hetero_graphs(graphs, context="TemporalEventBatch")
+        first_graph = graphs[0]
+        record_edge_types = [_resolve_temporal_edge_type(record) for record in records]
+        edge_types = tuple(dict.fromkeys(record_edge_types))
+        edge_type_to_index = {edge_type: index for index, edge_type in enumerate(edge_types)}
+        edge_type_index = torch.tensor([edge_type_to_index[edge_type] for edge_type in record_edge_types], dtype=torch.long)
+
+        is_homo = set(first_graph.nodes) == {"node"} and len(first_graph.edges) == 1
+        if is_homo:
+            graph, graph_offsets = _batch_homo_graphs(graphs, context="TemporalEventBatch")
+        else:
+            graph, graph_offsets = _batch_hetero_graphs(graphs, context="TemporalEventBatch")
+
+        if len(edge_types) == 1:
+            edge_type = edge_types[0]
+            src_node_type = edge_type[0]
+            dst_node_type = edge_type[2]
+        else:
+            edge_type = None
+            src_node_type = None
+            dst_node_type = None
 
         src_values = []
         dst_values = []
-        for record in records:
+        for record, current_edge_type in zip(records, record_edge_types):
             record_graph = record.graph
-            if "node" not in record_graph.nodes:
-                raise ValueError("TemporalEventBatch requires a 'node' node type for event endpoints")
-            num_nodes = _node_count(record_graph.nodes["node"])
             src_index = int(record.src_index)
             dst_index = int(record.dst_index)
-            if src_index < 0 or src_index >= num_nodes or dst_index < 0 or dst_index >= num_nodes:
-                raise ValueError("TemporalEventBatch indices must fall within the source graph node range")
-            offset = graph_offsets[id(record_graph)]["node"]
-            src_values.append(src_index + offset)
-            dst_values.append(dst_index + offset)
+            if current_edge_type not in record_graph.edges:
+                raise ValueError("TemporalEventBatch record edge_type must exist in the source graph")
+            current_src_type, _, current_dst_type = current_edge_type
+            if is_homo:
+                num_nodes = int(record_graph.x.size(0))
+                if src_index < 0 or src_index >= num_nodes or dst_index < 0 or dst_index >= num_nodes:
+                    raise ValueError("TemporalEventBatch indices must fall within the source graph node range")
+                offset = graph_offsets[id(record_graph)]
+                src_values.append(src_index + offset)
+                dst_values.append(dst_index + offset)
+            else:
+                src_count = _node_count(record_graph.nodes[current_src_type])
+                dst_count = _node_count(record_graph.nodes[current_dst_type])
+                if src_index < 0 or src_index >= src_count or dst_index < 0 or dst_index >= dst_count:
+                    raise ValueError("TemporalEventBatch indices must fall within the source graph node range")
+                src_values.append(src_index + graph_offsets[id(record_graph)][current_src_type])
+                dst_values.append(dst_index + graph_offsets[id(record_graph)][current_dst_type])
 
         event_features = [record.event_features for record in records]
         if all(feature is None for feature in event_features):
@@ -763,6 +826,11 @@ class TemporalEventBatch:
             timestamp=torch.tensor([record.timestamp for record in records]),
             labels=torch.tensor([record.label for record in records]),
             event_features=stacked_event_features,
+            edge_types=edge_types,
+            edge_type_index=edge_type_index,
+            edge_type=edge_type,
+            src_node_type=src_node_type,
+            dst_node_type=dst_node_type,
             metadata=[record.metadata for record in records],
         )
 
@@ -804,6 +872,18 @@ class TemporalEventBatch:
                 dtype=dtype,
                 non_blocking=non_blocking,
             ),
+            edge_types=self.edge_types,
+            edge_type_index=None
+            if self.edge_type_index is None
+            else _transfer_tensor(
+                self.edge_type_index,
+                device=device,
+                dtype=dtype,
+                non_blocking=non_blocking,
+            ),
+            edge_type=self.edge_type,
+            src_node_type=self.src_node_type,
+            dst_node_type=self.dst_node_type,
             metadata=self.metadata,
         )
 
@@ -815,5 +895,10 @@ class TemporalEventBatch:
             timestamp=self.timestamp.pin_memory(),
             labels=self.labels.pin_memory(),
             event_features=None if self.event_features is None else self.event_features.pin_memory(),
+            edge_types=self.edge_types,
+            edge_type_index=None if self.edge_type_index is None else self.edge_type_index.pin_memory(),
+            edge_type=self.edge_type,
+            src_node_type=self.src_node_type,
+            dst_node_type=self.dst_node_type,
             metadata=self.metadata,
         )

@@ -147,3 +147,90 @@ def test_temporal_neighbor_sampler_prefetch_option_materializes_features_into_ba
     assert torch.equal(batch.graph.x, torch.tensor([[1.0, 0.0], [2.0, 0.0], [3.0, 0.0]]))
     assert torch.equal(batch.graph.edges[EDGE_TYPE].edge_weight, torch.tensor([10.0]))
 
+HETERO_EDGE_TYPE = ("author", "writes", "paper")
+
+
+def _hetero_graph():
+    return Graph.temporal(
+        nodes={
+            "author": {"x": torch.randn(2, 4)},
+            "paper": {"x": torch.randn(3, 4)},
+        },
+        edges={
+            HETERO_EDGE_TYPE: {
+                "edge_index": torch.tensor([[0, 1, 1], [1, 0, 2]]),
+                "timestamp": torch.tensor([1, 4, 6]),
+            }
+        },
+        time_attr="timestamp",
+    )
+
+
+def test_temporal_neighbor_sampler_extracts_relation_local_hetero_history_subgraph():
+    graph = _hetero_graph()
+    sampler = TemporalNeighborSampler(num_neighbors=[-1])
+
+    record = sampler.sample(
+        TemporalEventRecord(
+            graph=graph,
+            src_index=1,
+            dst_index=2,
+            timestamp=5,
+            label=1,
+            edge_type=HETERO_EDGE_TYPE,
+        )
+    )
+
+    assert record.edge_type == HETERO_EDGE_TYPE
+    assert torch.equal(record.graph.nodes["author"].n_id, torch.tensor([1]))
+    assert torch.equal(record.graph.nodes["paper"].n_id, torch.tensor([0, 2]))
+    assert torch.equal(record.graph.edges[HETERO_EDGE_TYPE].edge_index, torch.tensor([[0], [0]]))
+    assert torch.equal(record.graph.edges[HETERO_EDGE_TYPE].timestamp, torch.tensor([4]))
+    assert record.src_index == 0
+    assert record.dst_index == 1
+
+
+def test_temporal_neighbor_sampler_prefetch_option_materializes_features_into_hetero_record_graph():
+    graph = Graph.temporal(
+        nodes={
+            "author": {"x": torch.zeros(2, 2)},
+            "paper": {"x": torch.zeros(3, 2)},
+        },
+        edges={
+            HETERO_EDGE_TYPE: {
+                "edge_index": torch.tensor([[0, 1, 1], [1, 0, 2]]),
+                "timestamp": torch.tensor([1, 4, 6]),
+                "edge_weight": torch.zeros(3),
+            }
+        },
+        time_attr="timestamp",
+    )
+    feature_store = FeatureStore(
+        {
+            ("node", "author", "x"): InMemoryTensorStore(torch.tensor([[10.0, 0.0], [20.0, 0.0]])),
+            ("node", "paper", "x"): InMemoryTensorStore(torch.tensor([[1.0, 0.0], [2.0, 0.0], [3.0, 0.0]])),
+            ("edge", HETERO_EDGE_TYPE, "edge_weight"): InMemoryTensorStore(torch.tensor([11.0, 22.0, 33.0])),
+        }
+    )
+    graph.feature_store = feature_store
+    sampler = TemporalNeighborSampler(
+        num_neighbors=[-1],
+        node_feature_names={"author": ("x",), "paper": ("x",)},
+        edge_feature_names={HETERO_EDGE_TYPE: ("edge_weight",)},
+    )
+
+    record = sampler.sample(
+        TemporalEventRecord(
+            graph=graph,
+            src_index=1,
+            dst_index=2,
+            timestamp=5,
+            label=1,
+            edge_type=HETERO_EDGE_TYPE,
+        )
+    )
+
+    assert torch.equal(record.graph.nodes["author"].x, torch.tensor([[20.0, 0.0]]))
+    assert torch.equal(record.graph.nodes["paper"].x, torch.tensor([[1.0, 0.0], [3.0, 0.0]]))
+    assert torch.equal(record.graph.edges[HETERO_EDGE_TYPE].edge_weight, torch.tensor([22.0]))
+

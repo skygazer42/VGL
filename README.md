@@ -27,7 +27,7 @@
 
 - **Unified `Graph` object** — a single data structure for homogeneous, heterogeneous, and temporal graphs with schema validation, lightweight views, and batching.
 - **Dataset-style link prediction splits** — `RandomLinkSplit` creates train/val/test `LinkPredictionRecord` datasets that plug directly into the existing loader, sampler, and trainer stack.
-- **Mini-batch neighbor sampling** — `NodeNeighborSampler`, `LinkNeighborSampler`, and `TemporalNeighborSampler` provide PyG/DGL-style local subgraph training for homogeneous, heterogeneous, and temporal node/link workloads, with opt-in plan-backed node/edge feature materialization for sampled node, link, and temporal batches.
+- **Mini-batch neighbor sampling** — `NodeNeighborSampler`, `LinkNeighborSampler`, and `TemporalNeighborSampler` provide PyG/DGL-style local subgraph training for homogeneous, heterogeneous, and temporal node/link workloads, including relation-aware temporal event sampling for typed heterogeneous graphs, with opt-in plan-backed node/edge feature materialization for sampled node, link, and temporal batches.
 - **Foundation layers for scale** — `vgl.sparse`, `vgl.storage`, `vgl.ops`, `vgl.data`, and `vgl.distributed` provide sparse adjacency views, storage-backed graphs, graph transforms including relation-local hetero subgraphs/compaction, dataset catalogs / lazy on-disk formats, and local partition primitives plus typed node / edge routing, relation-scoped edge feature fetches, and partition-scoped graph queries while keeping `Graph`, `Loader`, and `Trainer` as the public entry points.
 - **50+ GNN convolution layers** — all built on a clean `MessagePassing` interface: `GCNConv`, `GATConv`, `SAGEConv`, `GINConv`, `TransformerConv`, and [many more](#supported-convolution-layers).
 - **Graph transformer encoders** — reusable encoder blocks such as `GraphTransformerEncoder`, `GraphormerEncoder`, `GPSLayer`, `NAGphormerEncoder`, and `SGFormerEncoder`.
@@ -340,6 +340,8 @@ task = TemporalEventPredictionTask(target="label")
 ```
 
 Use `FullGraphSampler` when the model should see the full temporal graph for each event, or switch to `TemporalNeighborSampler` to build strict-history local subgraphs with optional hop fanout, rolling time windows, and `max_events` caps.
+
+For typed heterogeneous temporal graphs, pass `edge_type=` on each `TemporalEventRecord`. The resulting `TemporalEventBatch` mirrors the typed link-prediction contract through `edge_type` / `edge_types`, `edge_type_index`, and `src_node_type` / `dst_node_type`, while `TemporalNeighborSampler` keeps strict-history extraction and feature prefetch scoped to that relation instead of mixing all event types.
 
 `TemporalNeighborSampler(node_feature_names=..., edge_feature_names=...)` can append plan-backed fetch stages as well, so strict-history event batches can overlay sampled `x` / edge features from a retained graph feature store or an explicit `feature_store=` source.
 

@@ -39,6 +39,26 @@ def _resolve_link_reverse_edge_type(record):
     return tuple(reverse_edge_type)
 
 
+def _resolve_temporal_edge_type(record):
+    edge_type = getattr(record, "edge_type", None)
+    if edge_type is None:
+        edge_type = record.metadata.get("edge_type")
+    if edge_type is not None:
+        return tuple(edge_type)
+    graph = record.graph
+    if len(graph.edges) == 1:
+        return next(iter(graph.edges))
+    try:
+        return graph._default_edge_type()
+    except AttributeError as exc:
+        raise ValueError("Temporal event prediction on heterogeneous graphs requires edge_type") from exc
+
+
+def _temporal_endpoint_types(record):
+    edge_type = _resolve_temporal_edge_type(record)
+    return edge_type, edge_type[0], edge_type[2]
+
+
 class Sampler:
     def sample(self, item):
         raise NotImplementedError
@@ -660,13 +680,12 @@ class TemporalNeighborSampler(LinkNeighborSampler):
         self.max_events = None if max_events is None else int(max_events)
         self.strict_history = bool(strict_history)
 
-    def _history_edge_ids(self, graph, timestamp):
+    def _history_edge_ids(self, graph, edge_type, timestamp):
         if graph.schema.time_attr is None:
             raise ValueError("TemporalNeighborSampler requires a temporal graph with schema.time_attr")
-        if set(graph.nodes) != {"node"} or len(graph.edges) != 1:
-            raise ValueError("TemporalNeighborSampler currently supports homogeneous temporal graphs only")
+        if edge_type not in graph.edges:
+            raise ValueError("TemporalNeighborSampler record edge_type must exist in the source graph")
 
-        edge_type = graph._default_edge_type()
         edge_store = graph.edges[edge_type]
         edge_timestamps = edge_store.data[graph.schema.time_attr]
         if self.strict_history:
@@ -681,7 +700,7 @@ class TemporalNeighborSampler(LinkNeighborSampler):
         if self.max_events is not None and edge_ids.numel() > self.max_events:
             order = torch.argsort(edge_timestamps[edge_ids], stable=True)
             edge_ids = edge_ids[order][-self.max_events :]
-        return edge_type, edge_ids
+        return edge_ids
 
     def _next_frontier_from_edge_index(self, edge_index, frontier, visited, fanout):
         if not frontier or edge_index.numel() == 0:
@@ -706,6 +725,66 @@ class TemporalNeighborSampler(LinkNeighborSampler):
             if not frontier:
                 break
         return torch.tensor(sorted(visited), dtype=torch.long, device=edge_index.device)
+
+    def _relation_next_frontier(self, edge_index, frontier, visited, fanout, *, src_type, dst_type):
+        if edge_index.numel() == 0:
+            return {node_type: set() for node_type in dict.fromkeys((src_type, dst_type))}
+        incident_mask = torch.zeros(edge_index.size(1), dtype=torch.bool, device=edge_index.device)
+        src_frontier = frontier.get(src_type, set())
+        dst_frontier = frontier.get(dst_type, set())
+        if src_frontier:
+            src_tensor = torch.tensor(sorted(src_frontier), dtype=torch.long, device=edge_index.device)
+            incident_mask |= torch.isin(edge_index[0], src_tensor)
+        if dst_frontier:
+            dst_tensor = torch.tensor(sorted(dst_frontier), dtype=torch.long, device=edge_index.device)
+            incident_mask |= torch.isin(edge_index[1], dst_tensor)
+        if not incident_mask.any():
+            return {node_type: set() for node_type in dict.fromkeys((src_type, dst_type))}
+
+        candidates = {node_type: set() for node_type in dict.fromkeys((src_type, dst_type))}
+        candidates[src_type].update(
+            int(node)
+            for node in edge_index[0, incident_mask].tolist()
+            if int(node) not in visited[src_type]
+        )
+        candidates[dst_type].update(
+            int(node)
+            for node in edge_index[1, incident_mask].tolist()
+            if int(node) not in visited[dst_type]
+        )
+
+        next_frontier = {}
+        for node_type, values in candidates.items():
+            candidate_list = sorted(values)
+            if fanout != -1 and len(candidate_list) > fanout:
+                permutation = torch.randperm(len(candidate_list), generator=self._generator)[:fanout].tolist()
+                candidate_list = [candidate_list[index] for index in permutation]
+            next_frontier[node_type] = set(candidate_list)
+        return next_frontier
+
+    def _relation_sample_node_ids(self, edge_index, src_index, dst_index, *, src_type, dst_type):
+        visited = {node_type: set() for node_type in dict.fromkeys((src_type, dst_type))}
+        visited[src_type].add(int(src_index))
+        visited[dst_type].add(int(dst_index))
+        frontier = {node_type: set(node_ids) for node_type, node_ids in visited.items()}
+        for fanout in self.num_neighbors:
+            frontier = self._relation_next_frontier(
+                edge_index,
+                frontier,
+                visited,
+                fanout,
+                src_type=src_type,
+                dst_type=dst_type,
+            )
+            for node_type, node_ids in frontier.items():
+                visited[node_type].update(node_ids)
+            if not any(frontier.values()):
+                break
+        device = edge_index.device
+        return {
+            node_type: torch.tensor(sorted(node_ids), dtype=torch.long, device=device)
+            for node_type, node_ids in visited.items()
+        }
 
     def _subgraph(self, graph, edge_type, node_ids, history_edge_ids):
         node_ids = node_ids.to(dtype=torch.long)
@@ -753,7 +832,61 @@ class TemporalNeighborSampler(LinkNeighborSampler):
             node_mapping,
         )
 
-    def _local_record(self, record, graph, node_mapping):
+    def _relation_subgraph(self, graph, edge_type, node_ids_by_type, history_edge_ids):
+        src_type, _, dst_type = edge_type
+        unique_node_types = tuple(dict.fromkeys((src_type, dst_type)))
+        node_masks = {}
+        node_mappings = {}
+        nodes = {}
+        for node_type in unique_node_types:
+            store = graph.nodes[node_type]
+            node_ids = node_ids_by_type[node_type].to(dtype=torch.long)
+            num_nodes = store.x.size(0)
+            node_mask = torch.zeros(num_nodes, dtype=torch.bool, device=store.x.device)
+            if node_ids.numel() > 0:
+                node_mask[node_ids] = True
+            node_mapping = torch.full((num_nodes,), -1, dtype=torch.long, device=store.x.device)
+            node_mapping[node_ids] = torch.arange(node_ids.numel(), dtype=torch.long, device=store.x.device)
+            node_masks[node_type] = node_mask
+            node_mappings[node_type] = node_mapping
+
+            node_data = {}
+            for key, value in store.data.items():
+                if isinstance(value, torch.Tensor) and value.ndim > 0 and value.size(0) == num_nodes:
+                    node_data[key] = value[node_ids]
+                else:
+                    node_data[key] = value
+            if "n_id" not in node_data:
+                node_data["n_id"] = node_ids
+            nodes[node_type] = node_data
+
+        edge_store = graph.edges[edge_type]
+        history_edge_index = edge_store.edge_index[:, history_edge_ids]
+        edge_mask = node_masks[src_type][history_edge_index[0]] & node_masks[dst_type][history_edge_index[1]]
+        kept_edge_ids = history_edge_ids[edge_mask]
+        subgraph_edge_index = torch.stack(
+            [
+                node_mappings[src_type][history_edge_index[0, edge_mask]],
+                node_mappings[dst_type][history_edge_index[1, edge_mask]],
+            ],
+            dim=0,
+        )
+
+        edge_count = int(edge_store.edge_index.size(1))
+        edge_data = {"edge_index": subgraph_edge_index}
+        for key, value in edge_store.data.items():
+            if key == "edge_index":
+                continue
+            if isinstance(value, torch.Tensor) and value.ndim > 0 and value.size(0) == edge_count:
+                edge_data[key] = value[kept_edge_ids]
+            else:
+                edge_data[key] = value
+        if "e_id" not in edge_data:
+            edge_data["e_id"] = kept_edge_ids
+
+        return Graph.temporal(nodes=nodes, edges={edge_type: edge_data}, time_attr=graph.schema.time_attr), node_mappings
+
+    def _local_record(self, record, graph, node_mapping, *, edge_type):
         return TemporalEventRecord(
             graph=graph,
             src_index=int(node_mapping[int(record.src_index)].item()),
@@ -763,20 +896,66 @@ class TemporalNeighborSampler(LinkNeighborSampler):
             event_features=record.event_features,
             metadata=dict(record.metadata),
             sample_id=record.sample_id,
+            edge_type=edge_type,
+        )
+
+    def _hetero_local_record(self, record, graph, node_mapping, *, edge_type):
+        _, src_type, dst_type = _temporal_endpoint_types(record)
+        return TemporalEventRecord(
+            graph=graph,
+            src_index=int(node_mapping[src_type][int(record.src_index)].item()),
+            dst_index=int(node_mapping[dst_type][int(record.dst_index)].item()),
+            timestamp=int(record.timestamp),
+            label=int(record.label),
+            event_features=record.event_features,
+            metadata=dict(record.metadata),
+            sample_id=record.sample_id,
+            edge_type=edge_type,
+        )
+
+    def _resolved_temporal_node_feature_names(self, graph, edge_type):
+        src_type, _, dst_type = edge_type
+        allowed_types = set((src_type, dst_type))
+        return tuple(
+            (node_type, feature_names)
+            for node_type, feature_names in self._resolved_node_feature_names(graph)
+            if node_type in allowed_types
+        )
+
+    def _resolved_temporal_edge_feature_names(self, graph, edge_type):
+        return tuple(
+            (current_edge_type, feature_names)
+            for current_edge_type, feature_names in self._resolved_edge_feature_names(graph)
+            if tuple(current_edge_type) == tuple(edge_type)
         )
 
     def _sample_event(self, item):
         if not isinstance(item, TemporalEventRecord):
             raise TypeError("TemporalNeighborSampler requires TemporalEventRecord items")
-        edge_type, history_edge_ids = self._history_edge_ids(item.graph, int(item.timestamp))
+        edge_type = _resolve_temporal_edge_type(item)
+        history_edge_ids = self._history_edge_ids(item.graph, edge_type, int(item.timestamp))
+        if set(item.graph.nodes) == {"node"} and len(item.graph.edges) == 1:
+            history_edge_index = item.graph.edges[edge_type].edge_index[:, history_edge_ids]
+            node_ids = self._sample_node_ids(history_edge_index, item.src_index, item.dst_index)
+            subgraph, node_mapping = self._subgraph(item.graph, edge_type, node_ids, history_edge_ids)
+            return self._local_record(item, subgraph, node_mapping, edge_type=edge_type)
+
+        _, src_type, dst_type = _temporal_endpoint_types(item)
         history_edge_index = item.graph.edges[edge_type].edge_index[:, history_edge_ids]
-        node_ids = self._sample_node_ids(history_edge_index, item.src_index, item.dst_index)
-        subgraph, node_mapping = self._subgraph(item.graph, edge_type, node_ids, history_edge_ids)
-        return self._local_record(item, subgraph, node_mapping)
+        node_ids_by_type = self._relation_sample_node_ids(
+            history_edge_index,
+            item.src_index,
+            item.dst_index,
+            src_type=src_type,
+            dst_type=dst_type,
+        )
+        subgraph, node_mapping = self._relation_subgraph(item.graph, edge_type, node_ids_by_type, history_edge_ids)
+        return self._hetero_local_record(item, subgraph, node_mapping, edge_type=edge_type)
 
     def build_plan(self, item) -> SamplingPlan:
         if not isinstance(item, TemporalEventRecord):
             raise TypeError("TemporalNeighborSampler requires TemporalEventRecord items")
+        edge_type = _resolve_temporal_edge_type(item)
         plan_metadata = {}
         if item.sample_id is not None:
             plan_metadata["sample_id"] = item.sample_id
@@ -786,6 +965,7 @@ class TemporalNeighborSampler(LinkNeighborSampler):
                 src_ids=torch.tensor([int(item.src_index)], dtype=torch.long),
                 dst_ids=torch.tensor([int(item.dst_index)], dtype=torch.long),
                 timestamps=torch.tensor([int(item.timestamp)], dtype=torch.long),
+                edge_type=edge_type,
                 metadata=dict(item.metadata),
             ),
             stages=(
@@ -799,27 +979,29 @@ class TemporalNeighborSampler(LinkNeighborSampler):
         )
 
         additional_stages = []
-        for node_type, feature_names in self._resolved_node_feature_names(graph):
+        node_index_key = "node_ids" if edge_type[0] == edge_type[2] == "node" else "node_ids_by_type"
+        edge_index_key = "edge_ids" if edge_type[0] == edge_type[2] == "node" else "edge_ids_by_type"
+        for node_type, feature_names in self._resolved_temporal_node_feature_names(graph, edge_type):
             additional_stages.append(
                 PlanStage(
                     "fetch_node_features",
                     params={
                         "node_type": node_type,
                         "feature_names": feature_names,
-                        "index_key": "node_ids",
+                        "index_key": node_index_key,
                         "output_key": f"node_features:{node_type}",
                     },
                 )
             )
-        for edge_type, feature_names in self._resolved_edge_feature_names(graph):
+        for current_edge_type, feature_names in self._resolved_temporal_edge_feature_names(graph, edge_type):
             additional_stages.append(
                 PlanStage(
                     "fetch_edge_features",
                     params={
-                        "edge_type": edge_type,
+                        "edge_type": current_edge_type,
                         "feature_names": feature_names,
-                        "index_key": "edge_ids",
-                        "output_key": f"edge_features:{edge_type}",
+                        "index_key": edge_index_key,
+                        "output_key": f"edge_features:{current_edge_type}",
                     },
                 )
             )

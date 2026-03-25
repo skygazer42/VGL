@@ -38,3 +38,4 @@ class TemporalEventRecord:
     event_features: Any | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     sample_id: str | None = None
+    edge_type: Any | None = None

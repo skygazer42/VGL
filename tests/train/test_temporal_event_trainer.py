@@ -92,3 +92,58 @@ def test_trainer_runs_temporal_event_prediction_epoch_with_temporal_neighbor_sam
     history = trainer.fit(loader)
 
     assert history["epochs"] == 1
+
+HETERO_EDGE_TYPE = ("author", "writes", "paper")
+
+
+class TinyHeteroTemporalEventModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear = nn.Linear(9, 2)
+
+    def forward(self, batch):
+        src_x = batch.graph.nodes[batch.src_node_type].x[batch.src_index]
+        dst_x = batch.graph.nodes[batch.dst_node_type].x[batch.dst_index]
+        history_counts = torch.tensor(
+            [batch.history_graph(i).edges[batch.edge_type].edge_index.size(1) for i in range(batch.labels.size(0))],
+            dtype=src_x.dtype,
+        ).unsqueeze(-1)
+        return self.linear(torch.cat([src_x, dst_x, history_counts], dim=-1))
+
+
+def test_trainer_runs_temporal_event_prediction_epoch_with_hetero_temporal_neighbor_sampling():
+    graph = Graph.temporal(
+        nodes={
+            "author": {"x": torch.randn(2, 4)},
+            "paper": {"x": torch.randn(3, 4)},
+        },
+        edges={
+            HETERO_EDGE_TYPE: {
+                "edge_index": torch.tensor([[0, 1, 1], [1, 0, 2]]),
+                "timestamp": torch.tensor([1, 4, 6]),
+            }
+        },
+        time_attr="timestamp",
+    )
+    loader = Loader(
+        dataset=ListDataset(
+            [
+                TemporalEventRecord(graph=graph, src_index=1, dst_index=2, timestamp=5, label=1, edge_type=HETERO_EDGE_TYPE),
+                TemporalEventRecord(graph=graph, src_index=0, dst_index=1, timestamp=2, label=0, edge_type=HETERO_EDGE_TYPE),
+            ]
+        ),
+        sampler=TemporalNeighborSampler(num_neighbors=[-1]),
+        batch_size=2,
+    )
+    trainer = Trainer(
+        model=TinyHeteroTemporalEventModel(),
+        task=TemporalEventPredictionTask(target="label"),
+        optimizer=torch.optim.Adam,
+        lr=1e-2,
+        max_epochs=1,
+    )
+
+    history = trainer.fit(loader)
+
+    assert history["epochs"] == 1
+
