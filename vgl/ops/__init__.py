@@ -12,7 +12,9 @@ from vgl.ops.structure import add_self_loops as add_self_loops
 from vgl.ops.structure import remove_self_loops as remove_self_loops
 from vgl.ops.structure import to_bidirected as to_bidirected
 from vgl.ops.subgraph import edge_subgraph as edge_subgraph
+from vgl.ops.subgraph import in_subgraph as in_subgraph
 from vgl.ops.subgraph import node_subgraph as node_subgraph
+from vgl.ops.subgraph import out_subgraph as out_subgraph
 
 __all__ = [
     "GraphTransform",
@@ -26,6 +28,8 @@ __all__ = [
     "metapath_random_walk",
     "node_subgraph",
     "edge_subgraph",
+    "in_subgraph",
+    "out_subgraph",
     "khop_nodes",
     "khop_subgraph",
     "compact_nodes",

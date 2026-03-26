@@ -213,6 +213,16 @@ class Graph:
 
         return edge_subgraph(self, edge_ids, edge_type=edge_type)
 
+    def in_subgraph(self, nodes):
+        from vgl.ops import in_subgraph
+
+        return in_subgraph(self, nodes)
+
+    def out_subgraph(self, nodes):
+        from vgl.ops import out_subgraph
+
+        return out_subgraph(self, nodes)
+
     def khop_nodes(self, seeds, *, num_hops: int, direction: str = "out", edge_type=None):
         from vgl.ops import khop_nodes
 

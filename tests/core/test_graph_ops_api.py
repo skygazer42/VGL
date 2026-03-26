@@ -89,3 +89,19 @@ def test_graph_metapath_random_walk_bridge_calls_ops_layer():
     traces = graph.metapath_random_walk(torch.tensor([0, 1]), [writes, published_in])
 
     assert torch.equal(traces, torch.tensor([[0, 0, 0], [1, 1, 0]]))
+
+
+def test_graph_frontier_subgraph_bridges_call_ops_layer():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 2, 3, 1], [2, 3, 0, 3]]),
+        x=torch.tensor([[1.0], [2.0], [3.0], [4.0]]),
+        edge_data={"edge_weight": torch.tensor([1.0, 2.0, 3.0, 4.0])},
+    )
+
+    inbound = graph.in_subgraph(torch.tensor([3, 0]))
+    outbound = graph.out_subgraph(torch.tensor([0, 3]))
+
+    assert torch.equal(inbound.edge_index, torch.tensor([[2, 3, 1], [3, 0, 3]]))
+    assert torch.equal(inbound.edata["e_id"], torch.tensor([1, 2, 3]))
+    assert torch.equal(outbound.edge_index, torch.tensor([[0, 3], [2, 0]]))
+    assert torch.equal(outbound.edata["e_id"], torch.tensor([0, 2]))

@@ -3,6 +3,7 @@ import torch
 from vgl import Graph
 from vgl.graph import GraphSchema
 from vgl.storage import FeatureStore, InMemoryGraphStore, InMemoryTensorStore
+from vgl.ops import in_subgraph, out_subgraph
 
 
 class RecordingTensorStore:
@@ -216,3 +217,33 @@ def test_featureless_storage_backed_hetero_graph_preserves_adjacency_shape():
     adjacency = graph.adjacency(edge_type=WRITES)
 
     assert adjacency.shape == (3, 4)
+
+
+def test_featureless_storage_backed_frontier_subgraphs_preserve_node_count():
+    schema = GraphSchema(
+        node_types=("node",),
+        edge_types=(HOMO_EDGE,),
+        node_features={"node": ()},
+        edge_features={HOMO_EDGE: ("edge_index",)},
+    )
+    graph_store = InMemoryGraphStore(
+        {HOMO_EDGE: torch.tensor([[0, 1], [1, 0]])},
+        num_nodes={"node": 4},
+    )
+    graph = Graph.from_storage(
+        schema=schema,
+        feature_store=FeatureStore({}),
+        graph_store=graph_store,
+    )
+
+    inbound = in_subgraph(graph, torch.tensor([0]))
+    outbound = out_subgraph(graph, torch.tensor([0]))
+
+    assert inbound.graph_store is graph_store
+    assert outbound.graph_store is graph_store
+    assert inbound.adjacency().shape == (4, 4)
+    assert outbound.adjacency().shape == (4, 4)
+    assert torch.equal(inbound.edge_index, torch.tensor([[1], [0]]))
+    assert torch.equal(outbound.edge_index, torch.tensor([[0], [1]]))
+    assert torch.equal(inbound.edata["e_id"], torch.tensor([1]))
+    assert torch.equal(outbound.edata["e_id"], torch.tensor([0]))

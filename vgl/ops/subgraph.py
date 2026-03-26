@@ -1,6 +1,8 @@
 import torch
 
 from vgl.graph.graph import Graph
+from vgl.graph.schema import GraphSchema
+from vgl.graph.stores import EdgeStore, NodeStore
 
 
 def _ordered_unique(ids: torch.Tensor | list[int] | tuple[int, ...]) -> torch.Tensor:
@@ -54,6 +56,77 @@ def _relabel_bipartite_edge_index(edge_index, src_mapping: dict[int, int], dst_m
         dtype=edge_index.dtype,
         device=edge_index.device,
     ).t().contiguous()
+
+
+def _normalize_frontier_nodes(graph: Graph, nodes) -> dict[str, torch.Tensor]:
+    node_types = graph.schema.node_types
+    if isinstance(nodes, dict):
+        frontiers = {}
+        valid = set(node_types)
+        for node_type, node_ids in nodes.items():
+            if node_type not in valid:
+                raise ValueError(f"unknown node type {node_type!r}")
+            frontiers[node_type] = _ordered_unique(node_ids)
+        return frontiers
+    if len(node_types) != 1:
+        raise ValueError("heterogeneous frontier subgraph requires node ids keyed by node type")
+    return {node_types[0]: _ordered_unique(nodes)}
+
+
+def _public_edge_ids(store, edge_ids: torch.Tensor) -> torch.Tensor:
+    edge_ids = torch.as_tensor(edge_ids, dtype=torch.long).view(-1)
+    public_ids = store.data.get("e_id")
+    if public_ids is None:
+        return edge_ids
+    public_ids = torch.as_tensor(public_ids, dtype=torch.long, device=edge_ids.device)
+    return public_ids[edge_ids]
+
+
+def _preserved_node_stores(graph: Graph) -> dict[str, NodeStore]:
+    return {
+        node_type: NodeStore(node_type, graph.nodes[node_type].data)
+        for node_type in graph.schema.node_types
+    }
+
+
+def _frontier_edge_ids(store, frontier: torch.Tensor | None, *, endpoint: int) -> torch.Tensor:
+    device_frontier = None if frontier is None else frontier.to(device=store.edge_index.device)
+    if device_frontier is None or int(device_frontier.numel()) == 0:
+        return torch.empty(0, dtype=torch.long, device=store.edge_index.device)
+    mask = torch.isin(store.edge_index[endpoint], device_frontier)
+    return torch.nonzero(mask, as_tuple=False).view(-1)
+
+
+def _frontier_subgraph(graph: Graph, nodes, *, endpoint: int) -> Graph:
+    frontiers = _normalize_frontier_nodes(graph, nodes)
+    node_stores = _preserved_node_stores(graph)
+    edge_stores = {}
+    edge_features = {}
+    for edge_type in graph.schema.edge_types:
+        store = graph.edges[edge_type]
+        node_type = edge_type[2] if endpoint == 1 else edge_type[0]
+        edge_ids = _frontier_edge_ids(store, frontiers.get(node_type), endpoint=endpoint)
+        edge_data = _slice_edge_store(store, edge_ids)
+        edge_data["e_id"] = _public_edge_ids(store, edge_ids)
+        edge_stores[edge_type] = EdgeStore(edge_type, edge_data)
+        edge_features[edge_type] = tuple(edge_data.keys())
+    schema = GraphSchema(
+        node_types=graph.schema.node_types,
+        edge_types=graph.schema.edge_types,
+        node_features={
+            node_type: tuple(graph.nodes[node_type].data.keys())
+            for node_type in graph.schema.node_types
+        },
+        edge_features=edge_features,
+        time_attr=graph.schema.time_attr,
+    )
+    return Graph(
+        schema=schema,
+        nodes=node_stores,
+        edges=edge_stores,
+        feature_store=graph.feature_store,
+        graph_store=graph.graph_store,
+    )
 
 
 def node_subgraph(graph: Graph, node_ids, *, edge_type=None) -> Graph:
@@ -140,3 +213,11 @@ def edge_subgraph(graph: Graph, edge_ids, *, edge_type=None) -> Graph:
     if dst_type != src_type:
         nodes[dst_type] = dict(graph.nodes[dst_type].data)
     return Graph.hetero(nodes=nodes, edges={edge_type: edge_data}, time_attr=graph.schema.time_attr)
+
+
+def in_subgraph(graph: Graph, nodes) -> Graph:
+    return _frontier_subgraph(graph, nodes, endpoint=1)
+
+
+def out_subgraph(graph: Graph, nodes) -> Graph:
+    return _frontier_subgraph(graph, nodes, endpoint=0)
