@@ -1732,22 +1732,29 @@ class PlanExecutor:
         if stitched_homo_partition is None:
             stitched_hetero_partition = _match_hetero_partition_shard(graph, context.feature_store)
         if stitched_homo_partition is not None:
-            if output_blocks:
-                raise ValueError(
-                    "LinkNeighborSampler output_blocks is not yet supported for stitched homogeneous link sampling"
-                )
             seed_local_ids = torch.tensor(
                 [int(node) for record in records for node in (record.src_index, record.dst_index)],
                 dtype=torch.long,
             )
             seed_global_ids = _graph_node_global_ids(graph, seed_local_ids, node_type="node")
-            node_ids_global = _expand_stitched_homo_global_node_ids(
-                context.feature_store,
-                seed_global_ids,
-                fanouts=sampler.num_neighbors,
-                edge_type=graph._default_edge_type(),
-                generator=getattr(sampler, "_generator", None),
-            )
+            link_node_hops = None
+            if output_blocks:
+                node_ids_global, link_node_hops = _expand_stitched_homo_global_node_ids(
+                    context.feature_store,
+                    seed_global_ids,
+                    fanouts=sampler.num_neighbors,
+                    edge_type=graph._default_edge_type(),
+                    generator=getattr(sampler, "_generator", None),
+                    return_hops=True,
+                )
+            else:
+                node_ids_global = _expand_stitched_homo_global_node_ids(
+                    context.feature_store,
+                    seed_global_ids,
+                    fanouts=sampler.num_neighbors,
+                    edge_type=graph._default_edge_type(),
+                    generator=getattr(sampler, "_generator", None),
+                )
             edge_ids_global, edge_index_global = _collect_stitched_homo_edges(
                 context.feature_store,
                 node_ids_global,
@@ -1762,6 +1769,9 @@ class PlanExecutor:
             )
             sampled_records = _build_stitched_homo_link_records(graph, records, stitched_graph)
             sampled = sampled_records if bool(stage.params["is_sequence"]) else sampled_records[0]
+            if link_node_hops is not None:
+                context.state["link_node_ids_local"] = stitched_graph.n_id
+                context.state["link_node_hops"] = link_node_hops
         elif stitched_hetero_partition is not None:
             if output_blocks:
                 raise ValueError("LinkNeighborSampler output_blocks currently supports homogeneous link sampling only")

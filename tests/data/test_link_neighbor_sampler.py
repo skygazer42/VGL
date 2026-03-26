@@ -331,6 +331,99 @@ def test_link_neighbor_sampler_stitched_link_sampling_crosses_partition_boundari
 
 
 
+def test_link_neighbor_sampler_stitched_output_blocks_materialize_blocks_through_coordinator(tmp_path):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1], [1, 2]], dtype=torch.long),
+        x=torch.arange(4, dtype=torch.float32).view(4, 1),
+        edge_data={"edge_weight": torch.tensor([10.0, 20.0], dtype=torch.float32)},
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    coordinator = LocalSamplingCoordinator(shards)
+    loader = Loader(
+        dataset=ListDataset(
+            [
+                LinkPredictionRecord(
+                    graph=shards[0].graph,
+                    src_index=0,
+                    dst_index=1,
+                    label=1,
+                )
+            ]
+        ),
+        sampler=LinkNeighborSampler(
+            num_neighbors=[-1, -1],
+            node_feature_names=("x",),
+            edge_feature_names=("edge_weight",),
+            output_blocks=True,
+        ),
+        batch_size=1,
+        feature_store=coordinator,
+    )
+
+    batch = next(iter(loader))
+
+    assert torch.equal(batch.graph.n_id, torch.tensor([0, 1, 2], dtype=torch.long))
+    assert torch.equal(batch.graph.edge_index, torch.tensor([[0, 1], [1, 2]], dtype=torch.long))
+    assert torch.equal(batch.graph.edata["e_id"], torch.tensor([0, 1], dtype=torch.long))
+    assert torch.equal(batch.graph.x.view(-1), torch.tensor([0.0, 1.0, 2.0]))
+    assert torch.equal(batch.graph.edata["edge_weight"], torch.tensor([10.0, 20.0]))
+    assert batch.blocks is not None
+    assert len(batch.blocks) == 2
+    outer_block, inner_block = batch.blocks
+    assert torch.equal(outer_block.dst_n_id, torch.tensor([0, 1, 2], dtype=torch.long))
+    assert torch.equal(outer_block.src_n_id, torch.tensor([0, 1, 2], dtype=torch.long))
+    assert torch.equal(outer_block.edata["e_id"], torch.tensor([0, 1], dtype=torch.long))
+    assert torch.equal(outer_block.edata["edge_weight"], torch.tensor([10.0, 20.0]))
+    assert torch.equal(outer_block.srcdata["x"].view(-1), torch.tensor([0.0, 1.0, 2.0]))
+    assert torch.equal(inner_block.dst_n_id, torch.tensor([0, 1], dtype=torch.long))
+    assert torch.equal(inner_block.src_n_id, torch.tensor([0, 1], dtype=torch.long))
+    assert torch.equal(inner_block.edata["e_id"], torch.tensor([0], dtype=torch.long))
+    assert torch.equal(inner_block.edata["edge_weight"], torch.tensor([10.0]))
+
+
+
+def test_link_neighbor_sampler_stitched_output_blocks_exclude_seed_edges_from_message_passing_blocks(tmp_path):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[2, 0, 1], [0, 1, 2]], dtype=torch.long),
+        x=torch.arange(4, dtype=torch.float32).view(4, 1),
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    coordinator = LocalSamplingCoordinator(shards)
+    loader = Loader(
+        dataset=ListDataset(
+            [
+                LinkPredictionRecord(
+                    graph=shards[0].graph,
+                    src_index=0,
+                    dst_index=1,
+                    label=1,
+                    metadata={"exclude_seed_edges": True},
+                )
+            ]
+        ),
+        sampler=LinkNeighborSampler(num_neighbors=[-1], output_blocks=True),
+        batch_size=1,
+        feature_store=coordinator,
+    )
+
+    batch = next(iter(loader))
+
+    assert batch.blocks is not None
+    assert len(batch.blocks) == 1
+    assert torch.equal(batch.graph.edata["e_id"], torch.tensor([0, 2], dtype=torch.long))
+    assert 1 not in set(batch.blocks[0].edata["e_id"].tolist())
+    assert torch.equal(batch.blocks[0].edata["e_id"], torch.tensor([0], dtype=torch.long))
+
+
+
 def test_link_neighbor_sampler_stitched_hetero_link_sampling_crosses_partition_boundaries_through_coordinator(tmp_path):
     graph = Graph.hetero(
         nodes={
