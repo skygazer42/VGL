@@ -97,6 +97,31 @@ def _format_edge_selection(store, positions: torch.Tensor, *, form: str):
     return edge_index[0], edge_index[1], edge_ids
 
 
+def _all_edges_edge_type(graph: Graph, edge_type=None) -> tuple[str, str, str]:
+    if edge_type is not None:
+        return tuple(edge_type)
+    if len(graph.edges) == 1:
+        return next(iter(graph.edges))
+    raise ValueError("all_edges requires edge_type when graph has multiple edge types")
+
+
+def _ordered_edge_positions(store, *, order) -> torch.Tensor:
+    if order not in {None, "eid", "srcdst"}:
+        raise ValueError("order must be one of None, 'eid', or 'srcdst'")
+    count = int(store.edge_index.size(1))
+    device = store.edge_index.device
+    positions = torch.arange(count, dtype=torch.long, device=device)
+    if order is None or count == 0:
+        return positions
+    public_ids = _public_edge_ids(store)
+    positions = positions[torch.argsort(public_ids[positions], stable=True)]
+    if order == "eid":
+        return positions
+    positions = positions[torch.argsort(store.edge_index[1, positions], stable=True)]
+    positions = positions[torch.argsort(store.edge_index[0, positions], stable=True)]
+    return positions
+
+
 def _degrees_for_endpoint(graph: Graph, edge_type, nodes, *, endpoint: int):
     store = graph.edges[edge_type]
     node_ids, scalar_input = _normalize_optional_node_ids(nodes)
@@ -180,6 +205,33 @@ def has_edges_between(graph: Graph, u, v, *, edge_type=None):
     if scalar_input:
         return bool(exists[0])
     return torch.tensor(exists, dtype=torch.bool, device=store.edge_index.device)
+
+
+def num_nodes(graph: Graph, node_type=None) -> int:
+    if node_type is None:
+        return sum(graph._node_count(current_type) for current_type in graph.schema.node_types)
+    return graph._node_count(str(node_type))
+
+
+def number_of_nodes(graph: Graph, node_type=None) -> int:
+    return num_nodes(graph, node_type)
+
+
+def num_edges(graph: Graph, edge_type=None) -> int:
+    if edge_type is None:
+        return sum(int(store.edge_index.size(1)) for store in graph.edges.values())
+    return int(graph.edges[tuple(edge_type)].edge_index.size(1))
+
+
+def number_of_edges(graph: Graph, edge_type=None) -> int:
+    return num_edges(graph, edge_type)
+
+
+def all_edges(graph: Graph, *, form: str = "uv", order: str | None = "eid", edge_type=None):
+    edge_type = _all_edges_edge_type(graph, edge_type)
+    store = graph.edges[edge_type]
+    positions = _ordered_edge_positions(store, order=order)
+    return _format_edge_selection(store, positions, form=form)
 
 
 def in_degrees(graph: Graph, v=None, *, edge_type=None):

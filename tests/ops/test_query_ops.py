@@ -2,7 +2,7 @@ import pytest
 import torch
 
 from vgl import Graph
-from vgl.ops import edge_ids, find_edges, has_edges_between, in_degrees, in_edges, in_subgraph, out_degrees, out_edges, predecessors, reverse, successors
+from vgl.ops import all_edges, edge_ids, find_edges, has_edges_between, in_degrees, in_edges, in_subgraph, num_edges, num_nodes, number_of_edges, number_of_nodes, out_degrees, out_edges, predecessors, reverse, successors
 
 
 def test_find_edges_returns_endpoints_for_requested_edge_ids():
@@ -293,3 +293,81 @@ def test_in_degrees_and_out_degrees_validate_node_ranges():
 
     with pytest.raises(ValueError):
         out_degrees(graph, torch.tensor([3]))
+
+
+def test_num_nodes_and_num_edges_support_total_and_type_specific_counts():
+    writes = ("author", "writes", "paper")
+    cites = ("paper", "cites", "paper")
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.tensor([[1.0], [2.0]])},
+            "paper": {"x": torch.tensor([[10.0], [20.0], [30.0]])},
+        },
+        edges={
+            writes: {"edge_index": torch.tensor([[0, 1], [1, 2]])},
+            cites: {"edge_index": torch.tensor([[0], [2]])},
+        },
+    )
+
+    assert num_nodes(graph) == 5
+    assert number_of_nodes(graph, "author") == 2
+    assert number_of_nodes(graph, "paper") == 3
+    assert num_edges(graph) == 3
+    assert number_of_edges(graph, writes) == 2
+    assert number_of_edges(graph, cites) == 1
+
+
+def test_all_edges_supports_forms_and_public_eid_ordering():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[2, 0, 1], [0, 1, 0]]),
+        x=torch.tensor([[1.0], [2.0], [3.0]]),
+        edge_data={"e_id": torch.tensor([0, 2, 1])},
+    )
+
+    src, dst = all_edges(graph)
+    eids = all_edges(graph, form="eid")
+    src_all, dst_all, all_eids = all_edges(graph, form="all", order="srcdst")
+
+    assert torch.equal(src, torch.tensor([2, 1, 0]))
+    assert torch.equal(dst, torch.tensor([0, 0, 1]))
+    assert torch.equal(eids, torch.tensor([0, 1, 2]))
+    assert torch.equal(src_all, torch.tensor([0, 1, 2]))
+    assert torch.equal(dst_all, torch.tensor([1, 0, 0]))
+    assert torch.equal(all_eids, torch.tensor([2, 1, 0]))
+
+
+def test_all_edges_requires_edge_type_for_multi_relation_graphs():
+    writes = ("author", "writes", "paper")
+    cites = ("paper", "cites", "paper")
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.tensor([[1.0], [2.0]])},
+            "paper": {"x": torch.tensor([[10.0], [20.0], [30.0]])},
+        },
+        edges={
+            writes: {"edge_index": torch.tensor([[0, 1], [1, 2]])},
+            cites: {"edge_index": torch.tensor([[0], [2]])},
+        },
+    )
+
+    with pytest.raises(ValueError):
+        all_edges(graph)
+
+    src, dst, eids = all_edges(graph, form="all", edge_type=writes)
+
+    assert torch.equal(src, torch.tensor([0, 1]))
+    assert torch.equal(dst, torch.tensor([1, 2]))
+    assert torch.equal(eids, torch.tensor([0, 1]))
+
+
+def test_all_edges_validates_form_and_order():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1], [1, 2]]),
+        x=torch.tensor([[1.0], [2.0], [3.0]]),
+    )
+
+    with pytest.raises(ValueError):
+        all_edges(graph, form="bad")
+
+    with pytest.raises(ValueError):
+        all_edges(graph, order="bad")

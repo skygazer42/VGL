@@ -154,3 +154,21 @@ def test_graph_in_degrees_and_out_degrees_bridges_call_ops_layer():
     assert graph.out_degrees(0) == 2
     assert torch.equal(graph.in_degrees(), torch.tensor([1, 1, 2, 0]))
     assert torch.equal(graph.out_degrees(torch.tensor([0, 3])), torch.tensor([2, 0]))
+
+
+def test_graph_cardinality_and_all_edges_bridges_call_ops_layer():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[2, 0, 1], [0, 1, 0]]),
+        x=torch.tensor([[1.0], [2.0], [3.0]]),
+        edge_data={"e_id": torch.tensor([0, 2, 1])},
+    )
+
+    assert graph.num_nodes() == 3
+    assert graph.number_of_nodes() == 3
+    assert graph.num_edges() == 3
+    assert graph.number_of_edges() == 3
+    src, dst, eids = graph.all_edges(form="all", order="srcdst")
+
+    assert torch.equal(src, torch.tensor([0, 1, 2]))
+    assert torch.equal(dst, torch.tensor([1, 0, 0]))
+    assert torch.equal(eids, torch.tensor([2, 1, 0]))

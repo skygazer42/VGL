@@ -273,7 +273,7 @@ def test_legacy_core_package_reexports_graph_support_types():
 def test_foundation_packages_expose_namespace_exports():
     import vgl.ops as ops_module
     from vgl.ops import GraphTransform, TransformPipeline
-    from vgl.ops import add_self_loops, compact_nodes, edge_ids, edge_subgraph, find_edges, has_edges_between, in_degrees, in_edges, in_subgraph, khop_nodes, khop_subgraph, line_graph, metapath_reachable_graph, node_subgraph, out_degrees, out_edges, out_subgraph, predecessors, remove_self_loops, reverse, successors, to_bidirected, to_block
+    from vgl.ops import add_self_loops, all_edges, compact_nodes, edge_ids, edge_subgraph, find_edges, has_edges_between, in_degrees, in_edges, in_subgraph, khop_nodes, khop_subgraph, line_graph, metapath_reachable_graph, node_subgraph, num_edges, num_nodes, number_of_edges, number_of_nodes, out_degrees, out_edges, out_subgraph, predecessors, remove_self_loops, reverse, successors, to_bidirected, to_block
     from vgl.ops import __all__ as ops_all
     from vgl.sparse import SparseLayout, SparseTensor
     from vgl.sparse import __all__ as sparse_all
@@ -281,7 +281,7 @@ def test_foundation_packages_expose_namespace_exports():
     from vgl.storage import FeatureStore, GraphStore, InMemoryGraphStore, InMemoryTensorStore, MmapTensorStore, TensorSlice, TensorStore
     from vgl.storage import __all__ as storage_all
 
-    assert ops_all == ["GraphTransform", "TransformPipeline", "add_self_loops", "remove_self_loops", "to_bidirected", "reverse", "line_graph", "metapath_reachable_graph", "random_walk", "metapath_random_walk", "find_edges", "edge_ids", "has_edges_between", "in_degrees", "out_degrees", "in_edges", "out_edges", "predecessors", "successors", "node_subgraph", "edge_subgraph", "in_subgraph", "out_subgraph", "khop_nodes", "khop_subgraph", "compact_nodes", "to_block"]
+    assert ops_all == ["GraphTransform", "TransformPipeline", "add_self_loops", "remove_self_loops", "to_bidirected", "reverse", "line_graph", "metapath_reachable_graph", "random_walk", "metapath_random_walk", "find_edges", "edge_ids", "has_edges_between", "num_nodes", "number_of_nodes", "num_edges", "number_of_edges", "all_edges", "in_degrees", "out_degrees", "in_edges", "out_edges", "predecessors", "successors", "node_subgraph", "edge_subgraph", "in_subgraph", "out_subgraph", "khop_nodes", "khop_subgraph", "compact_nodes", "to_block"]
     assert sparse_all == ["SparseLayout", "SparseTensor", "from_edge_index", "to_coo", "to_csr", "to_csc", "degree", "select_rows", "select_cols", "transpose", "sum", "spmm", "sddmm", "edge_softmax"]
     assert storage_all == ["TensorSlice", "TensorStore", "InMemoryTensorStore", "MmapTensorStore", "FeatureStore", "GraphStore", "InMemoryGraphStore"]
     assert SparseLayout.__name__ == "SparseLayout"
@@ -300,6 +300,11 @@ def test_foundation_packages_expose_namespace_exports():
     assert callable(find_edges)
     assert callable(edge_ids)
     assert callable(has_edges_between)
+    assert callable(num_nodes)
+    assert callable(number_of_nodes)
+    assert callable(num_edges)
+    assert callable(number_of_edges)
+    assert callable(all_edges)
     assert callable(in_degrees)
     assert callable(in_edges)
     assert callable(out_degrees)
@@ -345,3 +350,25 @@ def test_foundation_packages_expose_in_degrees_and_out_degrees_exports():
     assert callable(out_degrees)
     assert callable(getattr(ops_module, "in_degrees", None))
     assert callable(getattr(ops_module, "out_degrees", None))
+
+
+def test_foundation_packages_expose_cardinality_and_all_edges_exports():
+    import vgl.ops as ops_module
+    from vgl.ops import all_edges, num_edges, num_nodes, number_of_edges, number_of_nodes
+    from vgl.ops import __all__ as ops_all
+
+    assert "num_nodes" in ops_all
+    assert "number_of_nodes" in ops_all
+    assert "num_edges" in ops_all
+    assert "number_of_edges" in ops_all
+    assert "all_edges" in ops_all
+    assert callable(num_nodes)
+    assert callable(number_of_nodes)
+    assert callable(num_edges)
+    assert callable(number_of_edges)
+    assert callable(all_edges)
+    assert callable(getattr(ops_module, "num_nodes", None))
+    assert callable(getattr(ops_module, "number_of_nodes", None))
+    assert callable(getattr(ops_module, "num_edges", None))
+    assert callable(getattr(ops_module, "number_of_edges", None))
+    assert callable(getattr(ops_module, "all_edges", None))

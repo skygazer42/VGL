@@ -213,6 +213,31 @@ class Graph:
 
         return edge_subgraph(self, edge_ids, edge_type=edge_type)
 
+    def num_nodes(self, node_type=None):
+        from vgl.ops import num_nodes
+
+        return num_nodes(self, node_type)
+
+    def number_of_nodes(self, node_type=None):
+        from vgl.ops import number_of_nodes
+
+        return number_of_nodes(self, node_type)
+
+    def num_edges(self, edge_type=None):
+        from vgl.ops import num_edges
+
+        return num_edges(self, edge_type)
+
+    def number_of_edges(self, edge_type=None):
+        from vgl.ops import number_of_edges
+
+        return number_of_edges(self, edge_type)
+
+    def all_edges(self, *, form: str = "uv", order: str | None = "eid", edge_type=None):
+        from vgl.ops import all_edges
+
+        return all_edges(self, form=form, order=order, edge_type=edge_type)
+
     def in_subgraph(self, nodes):
         from vgl.ops import in_subgraph
 
