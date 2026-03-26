@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING, Hashable, SupportsInt
 
 import torch
 
+from vgl.graph.block import Block
 from vgl.graph.graph import Graph
 from vgl.graph.stores import EdgeStore
 from vgl.graph.view import GraphView
@@ -60,6 +61,69 @@ def _unique_graphs(records):
         seen[graph_id] = len(graphs)
         graphs.append(record.graph)
     return graphs
+
+
+def _unique_blocks(blocks: list[Block]) -> list[Block]:
+    unique = []
+    seen = set()
+    for block in blocks:
+        graph_id = id(block.graph)
+        if graph_id in seen:
+            continue
+        seen.add(graph_id)
+        unique.append(block)
+    return unique
+
+
+def _batch_block_layer(blocks: list[Block]) -> Block:
+    if not blocks:
+        raise ValueError("NodeBatch block layers require at least one block")
+    if len(blocks) == 1:
+        return blocks[0]
+
+    first_block = blocks[0]
+    for block in blocks[1:]:
+        if (
+            block.edge_type != first_block.edge_type
+            or block.src_type != first_block.src_type
+            or block.dst_type != first_block.dst_type
+            or block.src_store_type != first_block.src_store_type
+            or block.dst_store_type != first_block.dst_store_type
+        ):
+            raise ValueError("NodeBatch requires matching block schemas when batching block layers")
+
+    graphs = [block.graph for block in blocks]
+    first_graph = graphs[0]
+    if set(first_graph.nodes) == {"node"} and len(first_graph.edges) == 1:
+        graph, _ = _batch_homo_graphs(graphs, context="NodeBatch blocks")
+    else:
+        graph, _ = _batch_hetero_graphs(graphs, context="NodeBatch blocks")
+    return Block(
+        graph=graph,
+        edge_type=first_block.edge_type,
+        src_type=first_block.src_type,
+        dst_type=first_block.dst_type,
+        src_n_id=torch.cat([block.src_n_id for block in blocks], dim=0),
+        dst_n_id=torch.cat([block.dst_n_id for block in blocks], dim=0),
+        src_store_type=first_block.src_store_type,
+        dst_store_type=first_block.dst_store_type,
+    )
+
+
+def _batch_blocks(samples: list["SampleRecord"]) -> list[Block] | None:
+    if all(sample.blocks is None for sample in samples):
+        return None
+    if any(sample.blocks is None for sample in samples):
+        raise ValueError("NodeBatch requires blocks for every sample when any sample includes blocks")
+
+    num_layers = len(samples[0].blocks)
+    if any(len(sample.blocks) != num_layers for sample in samples):
+        raise ValueError("NodeBatch requires the same number of blocks for every sample")
+
+    return [
+        _batch_block_layer(_unique_blocks([sample.blocks[layer] for sample in samples]))
+        for layer in range(num_layers)
+    ]
 
 
 def _node_aligned_value(value, count):
@@ -469,6 +533,7 @@ class NodeBatch:
     graph: Graph
     seed_index: torch.Tensor
     metadata: list[dict] | None = None
+    blocks: list[Block] | None = None
 
     @classmethod
     def from_samples(
@@ -511,6 +576,7 @@ class NodeBatch:
             graph=graph,
             seed_index=torch.tensor(seed_values, dtype=torch.long),
             metadata=[sample.metadata for sample in samples],
+            blocks=_batch_blocks(samples),
         )
 
     def to(self, device=None, dtype=None, non_blocking: bool = False):
@@ -523,6 +589,9 @@ class NodeBatch:
                 non_blocking=non_blocking,
             ),
             metadata=self.metadata,
+            blocks=None
+            if self.blocks is None
+            else [block.to(device=device, dtype=dtype, non_blocking=non_blocking) for block in self.blocks],
         )
 
     def pin_memory(self):
@@ -530,6 +599,7 @@ class NodeBatch:
             graph=self.graph.pin_memory(),
             seed_index=self.seed_index.pin_memory(),
             metadata=self.metadata,
+            blocks=None if self.blocks is None else [block.pin_memory() for block in self.blocks],
         )
 
 

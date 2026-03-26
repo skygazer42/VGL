@@ -36,6 +36,24 @@ def _block_store_types(src_type: str, dst_type: str) -> tuple[str, str]:
     return src_type, dst_type
 
 
+def _public_node_ids(graph: Graph, *, node_type: str, local_node_ids: torch.Tensor) -> torch.Tensor:
+    local_node_ids = torch.as_tensor(local_node_ids, dtype=torch.long).view(-1)
+    public_ids = graph.nodes[node_type].data.get("n_id")
+    if public_ids is None:
+        return local_node_ids
+    public_ids = torch.as_tensor(public_ids, dtype=torch.long, device=local_node_ids.device)
+    return public_ids[local_node_ids]
+
+
+def _public_edge_ids(store, edge_ids: torch.Tensor) -> torch.Tensor:
+    edge_ids = torch.as_tensor(edge_ids, dtype=torch.long).view(-1)
+    public_ids = store.data.get("e_id")
+    if public_ids is None:
+        return edge_ids
+    public_ids = torch.as_tensor(public_ids, dtype=torch.long, device=edge_ids.device)
+    return public_ids[edge_ids]
+
+
 def to_block(graph: Graph, dst_nodes, *, edge_type=None, include_dst_in_src: bool = True) -> Block:
     try:
         edge_type = _resolve_edge_type(graph, edge_type)
@@ -43,30 +61,36 @@ def to_block(graph: Graph, dst_nodes, *, edge_type=None, include_dst_in_src: boo
         raise ValueError("to_block requires edge_type when the source graph relation is ambiguous") from exc
     src_type, _, dst_type = edge_type
     store = graph.edges[edge_type]
-    dst_n_id = _validate_destination_nodes(dst_nodes, graph._node_count(dst_type))
+    dst_local_n_id = _validate_destination_nodes(dst_nodes, graph._node_count(dst_type))
 
     edge_index = store.edge_index
-    dst_mask = torch.isin(edge_index[1], dst_n_id.to(device=edge_index.device))
+    dst_mask = torch.isin(edge_index[1], dst_local_n_id.to(device=edge_index.device))
     edge_ids = torch.nonzero(dst_mask, as_tuple=False).view(-1)
     selected_edge_index = edge_index[:, edge_ids] if edge_ids.numel() > 0 else edge_index[:, :0]
-    predecessor_ids = _ordered_unique(selected_edge_index[0]) if selected_edge_index.numel() > 0 else torch.empty((0,), dtype=torch.long, device=edge_index.device)
+    predecessor_ids = (
+        _ordered_unique(selected_edge_index[0])
+        if selected_edge_index.numel() > 0
+        else torch.empty((0,), dtype=torch.long, device=edge_index.device)
+    )
 
     if src_type == dst_type and include_dst_in_src:
-        src_n_id = _ordered_prefix_union(dst_n_id.to(device=edge_index.device), predecessor_ids)
+        src_local_n_id = _ordered_prefix_union(dst_local_n_id.to(device=edge_index.device), predecessor_ids)
     else:
-        src_n_id = predecessor_ids
+        src_local_n_id = predecessor_ids
 
     src_store_type, dst_store_type = _block_store_types(src_type, dst_type)
-    src_mapping = {int(node_id): index for index, node_id in enumerate(src_n_id.tolist())}
-    dst_mapping = {int(node_id): index for index, node_id in enumerate(dst_n_id.tolist())}
+    src_mapping = {int(node_id): index for index, node_id in enumerate(src_local_n_id.tolist())}
+    dst_mapping = {int(node_id): index for index, node_id in enumerate(dst_local_n_id.tolist())}
+    src_n_id = _public_node_ids(graph, node_type=src_type, local_node_ids=src_local_n_id)
+    dst_n_id = _public_node_ids(graph, node_type=dst_type, local_node_ids=dst_local_n_id)
 
-    src_node_data = _slice_node_data(graph, src_n_id, node_type=src_type)
-    dst_node_data = _slice_node_data(graph, dst_n_id, node_type=dst_type)
+    src_node_data = _slice_node_data(graph, src_local_n_id, node_type=src_type)
+    dst_node_data = _slice_node_data(graph, dst_local_n_id, node_type=dst_type)
     src_node_data["n_id"] = src_n_id
     dst_node_data["n_id"] = dst_n_id
 
     edge_data = _slice_edge_store(store, edge_ids)
-    edge_data["e_id"] = edge_ids
+    edge_data["e_id"] = _public_edge_ids(store, edge_ids)
     edge_data["edge_index"] = _relabel_bipartite_edge_index(edge_data["edge_index"], src_mapping, dst_mapping)
 
     nodes = {src_store_type: src_node_data, dst_store_type: dst_node_data}

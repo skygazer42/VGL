@@ -9,6 +9,7 @@ class SampleRecord:
     sample_id: str | None = None
     source_graph_id: str | None = None
     subgraph_seed: Any | None = None
+    blocks: list[Any] | None = None
 
 
 @dataclass(slots=True)

@@ -510,3 +510,117 @@ def test_node_neighbor_sampler_stitched_sampling_crosses_partition_boundaries_th
     assert torch.equal(batch.graph.x, torch.arange(4, dtype=torch.float32).view(4, 1))
     assert torch.equal(batch.seed_index, torch.tensor([1]))
     assert batch.metadata == [{"seed": 1, "sample_id": "stitched"}]
+
+
+def test_node_neighbor_sampler_output_blocks_preserve_order_and_global_ids():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 3], [1, 2, 2]], dtype=torch.long),
+        x=torch.arange(16, dtype=torch.float32).view(4, 4),
+        n_id=torch.tensor([10, 11, 12, 13], dtype=torch.long),
+        edge_data={"e_id": torch.tensor([100, 101, 102], dtype=torch.long)},
+    )
+    sampler = NodeNeighborSampler(num_neighbors=[-1, -1], output_blocks=True)
+
+    sample = sampler.sample((graph, {"seed": 1, "sample_id": "n1"}))
+
+    assert sample.blocks is not None
+    assert len(sample.blocks) == 2
+    outer_block, inner_block = sample.blocks
+    assert torch.equal(sample.graph.n_id, torch.tensor([10, 11, 12, 13], dtype=torch.long))
+    assert torch.equal(outer_block.dst_n_id, torch.tensor([10, 11, 12], dtype=torch.long))
+    assert torch.equal(outer_block.src_n_id, torch.tensor([10, 11, 12, 13], dtype=torch.long))
+    assert torch.equal(outer_block.edata["e_id"], torch.tensor([100, 101, 102], dtype=torch.long))
+    assert torch.equal(inner_block.dst_n_id, torch.tensor([11], dtype=torch.long))
+    assert torch.equal(inner_block.src_n_id, torch.tensor([11, 10], dtype=torch.long))
+    assert torch.equal(inner_block.edata["e_id"], torch.tensor([100], dtype=torch.long))
+
+
+
+def test_node_neighbor_sampler_output_blocks_keep_fixed_hop_count_when_frontier_exhausts():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0], [1]], dtype=torch.long),
+        x=torch.randn(2, 2),
+    )
+    sampler = NodeNeighborSampler(num_neighbors=[-1, -1], output_blocks=True)
+
+    sample = sampler.sample((graph, {"seed": 1, "sample_id": "n1"}))
+
+    assert sample.blocks is not None
+    assert len(sample.blocks) == 2
+    assert torch.equal(sample.blocks[0].dst_n_id, torch.tensor([0, 1], dtype=torch.long))
+    assert torch.equal(sample.blocks[1].dst_n_id, torch.tensor([1], dtype=torch.long))
+
+
+
+def test_node_neighbor_sampler_output_blocks_use_only_sampled_edges():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 2, 3, 4, 1], [1, 1, 1, 1, 5]], dtype=torch.long),
+        x=torch.randn(6, 2),
+        edge_data={"e_id": torch.tensor([10, 11, 12, 13, 14], dtype=torch.long)},
+    )
+    sampler = NodeNeighborSampler(num_neighbors=[2], seed=0, output_blocks=True)
+
+    sample = sampler.sample((graph, {"seed": 1, "sample_id": "n1"}))
+
+    assert sample.blocks is not None
+    assert len(sample.blocks) == 1
+    sampled_node_ids = set(sample.graph.n_id.tolist())
+    omitted_edge_ids = [
+        edge_id
+        for edge_id, (src_index, dst_index) in zip(graph.edata["e_id"].tolist(), graph.edge_index.t().tolist())
+        if int(dst_index) == 1 and int(src_index) not in sampled_node_ids
+    ]
+    assert omitted_edge_ids
+    assert set(sample.blocks[0].edata["e_id"].tolist()).isdisjoint(omitted_edge_ids)
+
+
+
+def test_loader_materializes_node_batch_blocks_for_homogeneous_sampling():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 3], [1, 2, 2]], dtype=torch.long),
+        x=torch.arange(16, dtype=torch.float32).view(4, 4),
+        n_id=torch.tensor([10, 11, 12, 13], dtype=torch.long),
+        edge_data={"e_id": torch.tensor([100, 101, 102], dtype=torch.long)},
+    )
+    loader = Loader(
+        dataset=ListDataset([(graph, {"seed": 1, "sample_id": "n1"})]),
+        sampler=NodeNeighborSampler(num_neighbors=[-1, -1], output_blocks=True),
+        batch_size=1,
+    )
+
+    batch = next(iter(loader))
+
+    assert isinstance(batch, NodeBatch)
+    assert batch.blocks is not None
+    assert len(batch.blocks) == 2
+    assert torch.equal(batch.blocks[0].dst_n_id, torch.tensor([10, 11, 12], dtype=torch.long))
+    assert torch.equal(batch.blocks[1].dst_n_id, torch.tensor([11], dtype=torch.long))
+
+
+
+def test_node_neighbor_sampler_rejects_block_output_for_heterogeneous_graphs():
+    import pytest
+
+    graph = Graph.hetero(
+        nodes={
+            "paper": {
+                "x": torch.randn(3, 4),
+                "y": torch.tensor([0, 1, 0]),
+            },
+            "author": {
+                "x": torch.randn(2, 4),
+            },
+        },
+        edges={
+            ("author", "writes", "paper"): {
+                "edge_index": torch.tensor([[0, 1], [1, 2]], dtype=torch.long),
+            },
+            ("paper", "written_by", "author"): {
+                "edge_index": torch.tensor([[1, 2], [0, 1]], dtype=torch.long),
+            },
+        },
+    )
+    sampler = NodeNeighborSampler(num_neighbors=[-1], output_blocks=True)
+
+    with pytest.raises(ValueError, match="homogeneous"):
+        sampler.sample((graph, {"seed": 1, "node_type": "paper", "sample_id": "p1"}))

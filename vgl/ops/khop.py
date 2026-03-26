@@ -138,13 +138,24 @@ def _hetero_directional_khop_nodes(graph: Graph, seeds, *, num_hops: int, direct
     }
 
 
-def expand_neighbors(graph: Graph, seeds, *, num_neighbors, node_type: str | None = None, generator=None):
+def expand_neighbors(
+    graph: Graph,
+    seeds,
+    *,
+    num_neighbors,
+    node_type: str | None = None,
+    generator=None,
+    return_hops: bool = False,
+):
     fanouts = _normalize_fanouts(num_neighbors)
     seed_tensor = torch.as_tensor(seeds, dtype=torch.long).view(-1)
 
     if set(graph.nodes) == {"node"} and len(graph.edges) == 1:
         visited = {int(node) for node in seed_tensor.tolist()}
         frontier = set(visited)
+        hop_nodes = None
+        if return_hops:
+            hop_nodes = [torch.tensor(sorted(visited), dtype=torch.long, device=graph.edge_index.device)]
         for fanout in fanouts:
             frontier = _next_frontier_from_edge_index(
                 graph.edge_index,
@@ -154,10 +165,17 @@ def expand_neighbors(graph: Graph, seeds, *, num_neighbors, node_type: str | Non
                 generator=generator,
             )
             visited.update(frontier)
-            if not frontier:
+            if hop_nodes is not None:
+                hop_nodes.append(torch.tensor(sorted(visited), dtype=torch.long, device=graph.edge_index.device))
+            elif not frontier:
                 break
-        return torch.tensor(sorted(visited), dtype=torch.long, device=graph.edge_index.device)
+        expanded = torch.tensor(sorted(visited), dtype=torch.long, device=graph.edge_index.device)
+        if hop_nodes is not None:
+            return expanded, hop_nodes
+        return expanded
 
+    if return_hops:
+        raise ValueError("return_hops is only supported for homogeneous neighbor expansion")
     if node_type is None:
         raise ValueError("node_type is required for heterogeneous neighbor expansion")
     if node_type not in graph.nodes:

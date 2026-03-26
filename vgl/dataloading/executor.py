@@ -1575,8 +1575,13 @@ class PlanExecutor:
         if context.graph is None:
             raise ValueError("graph is required for neighbor expansion stages")
         request = context.request
+        output_blocks = bool(stage.params.get("output_blocks", False))
 
         if _match_partition_shard(context.graph, context.feature_store) is not None:
+            if output_blocks:
+                raise ValueError(
+                    "NodeNeighborSampler output_blocks is not yet supported for stitched homogeneous node sampling"
+                )
             seed_local_ids = torch.as_tensor(request.node_ids, dtype=torch.long).view(-1)
             seed_global_ids, node_ids_global = _expand_stitched_homo_node_ids(
                 context.graph,
@@ -1609,6 +1614,8 @@ class PlanExecutor:
             return context
 
         if _match_hetero_partition_shard(context.graph, context.feature_store) is not None:
+            if output_blocks:
+                raise ValueError("NodeNeighborSampler output_blocks currently supports homogeneous node sampling only")
             seed_local_ids = torch.as_tensor(request.node_ids, dtype=torch.long).view(-1)
             seed_global_ids, node_ids_by_type = _expand_stitched_hetero_node_ids(
                 context.graph,
@@ -1648,8 +1655,14 @@ class PlanExecutor:
             request.node_ids,
             num_neighbors=stage.params["num_neighbors"],
             node_type=stage.params.get("node_type", getattr(request, "node_type", None)),
+            return_hops=output_blocks,
         )
+        node_hops = None
+        if output_blocks:
+            expanded, node_hops = expanded
         if isinstance(expanded, dict):
+            if output_blocks:
+                raise ValueError("NodeNeighborSampler output_blocks currently supports homogeneous node sampling only")
             edge_ids_by_type = _induced_edge_ids_by_type(context.graph, expanded)
             context.state["node_ids_by_type"] = expanded
             context.state["edge_ids_by_type"] = edge_ids_by_type
@@ -1671,6 +1684,8 @@ class PlanExecutor:
                 edge_ids,
                 edge_type=context.graph._default_edge_type(),
             )
+            if node_hops is not None:
+                context.state["node_hops"] = node_hops
         return context
 
     def _fetch_node_features(self, stage: PlanStage, context: MaterializationContext) -> MaterializationContext:

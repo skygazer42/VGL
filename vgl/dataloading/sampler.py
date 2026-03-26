@@ -1016,10 +1016,19 @@ class TemporalNeighborSampler(LinkNeighborSampler):
 
 
 class NodeNeighborSampler(LinkNeighborSampler):
-    def __init__(self, num_neighbors, *, seed=None, node_feature_names=None, edge_feature_names=None):
+    def __init__(
+        self,
+        num_neighbors,
+        *,
+        seed=None,
+        node_feature_names=None,
+        edge_feature_names=None,
+        output_blocks: bool = False,
+    ):
         super().__init__(num_neighbors=num_neighbors, base_sampler=None, seed=seed)
         self.node_feature_names = node_feature_names
         self.edge_feature_names = edge_feature_names
+        self.output_blocks = bool(output_blocks)
 
     @staticmethod
     def _normalize_feature_names(feature_names):
@@ -1112,6 +1121,8 @@ class NodeNeighborSampler(LinkNeighborSampler):
 
     def build_plan(self, item) -> SamplingPlan:
         graph, metadata, sample_id, source_graph_id, seed_ids, node_type = self._seed_item(item)
+        if self.output_blocks and not (set(graph.nodes) == {"node"} and len(graph.edges) == 1):
+            raise ValueError("NodeNeighborSampler output_blocks currently supports homogeneous node sampling only")
         plan_metadata = {}
         if sample_id is not None:
             plan_metadata["sample_id"] = sample_id
@@ -1123,7 +1134,15 @@ class NodeNeighborSampler(LinkNeighborSampler):
                 node_type=node_type,
                 metadata=metadata,
             ),
-            stages=(PlanStage("expand_neighbors", params={"num_neighbors": tuple(self.num_neighbors)}),),
+            stages=(
+                PlanStage(
+                    "expand_neighbors",
+                    params={
+                        "num_neighbors": tuple(self.num_neighbors),
+                        "output_blocks": self.output_blocks,
+                    },
+                ),
+            ),
             metadata=plan_metadata,
             graph=graph,
         )

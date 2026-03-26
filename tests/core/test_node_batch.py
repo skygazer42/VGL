@@ -70,3 +70,64 @@ def test_node_batch_batches_hetero_subgraphs_with_seed_type_offsets():
         batch.graph.edges[("author", "writes", "paper")].edge_index,
         torch.tensor([[0, 2], [1, 2]]),
     )
+
+
+def test_node_batch_batches_block_layers_across_samples():
+    g1 = Graph.homo(
+        edge_index=torch.tensor([[0, 1], [1, 2]], dtype=torch.long),
+        x=torch.randn(3, 4),
+        n_id=torch.tensor([10, 11, 12], dtype=torch.long),
+        edge_data={"e_id": torch.tensor([100, 101], dtype=torch.long)},
+    )
+    g2 = Graph.homo(
+        edge_index=torch.tensor([[0, 1], [1, 2]], dtype=torch.long),
+        x=torch.randn(3, 4),
+        n_id=torch.tensor([20, 21, 22], dtype=torch.long),
+        edge_data={"e_id": torch.tensor([200, 201], dtype=torch.long)},
+    )
+    g1_blocks = [g1.to_block(torch.tensor([1, 2], dtype=torch.long)), g1.to_block(torch.tensor([2], dtype=torch.long))]
+    g2_blocks = [g2.to_block(torch.tensor([1, 2], dtype=torch.long)), g2.to_block(torch.tensor([2], dtype=torch.long))]
+
+    batch = NodeBatch.from_samples(
+        [
+            SampleRecord(
+                graph=g1,
+                metadata={"seed": 2, "sample_id": "a"},
+                sample_id="a",
+                subgraph_seed=2,
+                blocks=g1_blocks,
+            ),
+            SampleRecord(
+                graph=g2,
+                metadata={"seed": 2, "sample_id": "b"},
+                sample_id="b",
+                subgraph_seed=2,
+                blocks=g2_blocks,
+            ),
+        ]
+    )
+
+    assert batch.blocks is not None
+    assert len(batch.blocks) == 2
+    outer_block = batch.blocks[0]
+    inner_block = batch.blocks[1]
+    assert torch.equal(outer_block.src_n_id, torch.cat([g1_blocks[0].src_n_id, g2_blocks[0].src_n_id], dim=0))
+    assert torch.equal(outer_block.dst_n_id, torch.cat([g1_blocks[0].dst_n_id, g2_blocks[0].dst_n_id], dim=0))
+    assert torch.equal(inner_block.src_n_id, torch.cat([g1_blocks[1].src_n_id, g2_blocks[1].src_n_id], dim=0))
+    assert torch.equal(inner_block.dst_n_id, torch.cat([g1_blocks[1].dst_n_id, g2_blocks[1].dst_n_id], dim=0))
+    outer_offset = torch.tensor(
+        [[g1_blocks[0].src_n_id.numel()], [g1_blocks[0].dst_n_id.numel()]],
+        dtype=torch.long,
+    )
+    inner_offset = torch.tensor(
+        [[g1_blocks[1].src_n_id.numel()], [g1_blocks[1].dst_n_id.numel()]],
+        dtype=torch.long,
+    )
+    assert torch.equal(
+        outer_block.edge_index,
+        torch.cat([g1_blocks[0].edge_index, g2_blocks[0].edge_index + outer_offset], dim=1),
+    )
+    assert torch.equal(
+        inner_block.edge_index,
+        torch.cat([g1_blocks[1].edge_index, g2_blocks[1].edge_index + inner_offset], dim=1),
+    )

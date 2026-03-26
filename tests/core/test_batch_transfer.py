@@ -412,3 +412,54 @@ def test_temporal_event_batch_pin_memory_pins_typed_temporal_fields():
     assert pinned.src_node_type == "author"
     assert pinned.dst_node_type == "paper"
 
+
+
+def test_node_batch_to_moves_blocks():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1], [1, 2]], dtype=torch.long),
+        x=torch.randn(3, 4),
+        n_id=torch.tensor([10, 11, 12], dtype=torch.long),
+        edge_data={"e_id": torch.tensor([100, 101], dtype=torch.long)},
+    )
+    block = graph.to_block(torch.tensor([1, 2], dtype=torch.long))
+    batch = NodeBatch(
+        graph=graph,
+        seed_index=torch.tensor([1], dtype=torch.long),
+        blocks=[block],
+        metadata=[{"seed": 1}],
+    )
+
+    moved = batch.to(device=_transfer_device(), dtype=torch.float64)
+
+    assert moved is not batch
+    assert moved.blocks is not None
+    assert moved.blocks[0] is not block
+    assert moved.blocks[0].graph.nodes[moved.blocks[0].src_store_type].data["n_id"].device.type == "meta"
+    assert moved.blocks[0].src_n_id.device.type == "meta"
+    assert moved.blocks[0].dst_n_id.device.type == "meta"
+    assert batch.blocks[0].src_n_id.device.type == "cpu"
+
+
+
+def test_node_batch_pin_memory_pins_blocks():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1], [1, 2]], dtype=torch.long),
+        x=torch.randn(3, 4),
+        n_id=torch.tensor([10, 11, 12], dtype=torch.long),
+        edge_data={"e_id": torch.tensor([100, 101], dtype=torch.long)},
+    )
+    batch = NodeBatch(
+        graph=graph,
+        seed_index=torch.tensor([1], dtype=torch.long),
+        blocks=[graph.to_block(torch.tensor([1, 2], dtype=torch.long))],
+        metadata=[{"seed": 1}],
+    )
+
+    pinned = batch.pin_memory()
+
+    assert pinned is not batch
+    assert pinned.blocks is not None
+    assert pinned.blocks[0].src_n_id.is_pinned()
+    assert pinned.blocks[0].dst_n_id.is_pinned()
+    assert pinned.blocks[0].graph.nodes[pinned.blocks[0].src_store_type].data["n_id"].is_pinned()
+    assert not batch.blocks[0].src_n_id.is_pinned()

@@ -6,6 +6,7 @@ from vgl.dataloading.executor import MaterializationContext
 from vgl.dataloading.records import LinkPredictionRecord, SampleRecord, TemporalEventRecord
 from vgl.graph.batch import GraphBatch, LinkPredictionBatch, NodeBatch, TemporalEventBatch
 from vgl.graph.graph import Graph
+from vgl.ops.block import to_block
 
 
 def _align_tensor_slice(index: torch.Tensor, tensor_slice) -> torch.Tensor:
@@ -205,6 +206,14 @@ def _graph_with_materialized_features(
     return materialized
 
 
+def _build_homo_blocks(subgraph: Graph, node_mapping: torch.Tensor, node_hops: list[torch.Tensor]):
+    subgraph_hops = []
+    for hop_node_ids in node_hops:
+        hop_node_ids = torch.as_tensor(hop_node_ids, dtype=torch.long, device=node_mapping.device).view(-1)
+        subgraph_hops.append(node_mapping[hop_node_ids])
+    return [to_block(subgraph, dst_nodes) for dst_nodes in subgraph_hops[-2::-1]]
+
+
 def _materialize_record_payload(context: MaterializationContext, payload):
     fetched_node_features = context.state.get("_materialized_node_features")
     fetched_edge_features = context.state.get("_materialized_edge_features")
@@ -267,6 +276,12 @@ def _node_context_to_sample(context: MaterializationContext) -> SampleRecord | l
     else:
         raise ValueError("node context must contain expanded node ids for materialization")
 
+    blocks = None
+    if "node_hops" in context.state:
+        if node_type != "node":
+            raise ValueError("node block materialization currently supports homogeneous graphs only")
+        blocks = _build_homo_blocks(subgraph, node_mapping, context.state["node_hops"])
+
     samples = []
     for seed, subgraph_seed in zip(seeds, subgraph_seeds):
         sample_metadata = dict(metadata)
@@ -280,6 +295,7 @@ def _node_context_to_sample(context: MaterializationContext) -> SampleRecord | l
                 sample_id=sample_id,
                 source_graph_id=source_graph_id,
                 subgraph_seed=subgraph_seed,
+                blocks=blocks,
             )
         )
     if len(samples) == 1:
