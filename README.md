@@ -37,7 +37,7 @@
 - **Two-layer training logs** — default console progress plus pluggable structured loggers such as `JSONLinesLogger` and `TensorBoardLogger` make experiments easier to monitor and replay.
 - **End-to-end training** — `Trainer` handles the full loop including `fit()`, `evaluate()`, `test()`, early stopping, best-checkpoint saving, full training-state checkpoint/resume, epoch history tracking, gradient accumulation, scheduled gradient accumulation, gradient clipping, gradient value clipping, adaptive gradient clipping, gradient centralization, gradient noise injection, layer-wise learning-rate strategies, classification label smoothing, label smoothing scheduling, focal loss, focal-gamma scheduling, generalized cross entropy, generalized-cross-entropy scheduling, symmetric cross entropy, symmetric-cross-entropy beta scheduling, Poly-1 cross entropy, Poly-1 epsilon scheduling, soft/hard bootstrap loss correction, bootstrap-beta scheduling, confidence-penalty scheduling, flooding-level scheduling, `LDAM`, LDAM-margin scheduling, logit adjustment, logit-adjustment tau scheduling, balanced softmax, class weighting / `pos_weight`, `pos_weight` scheduling, weight-decay scheduling, loss flooding, confidence-penalty regularization, `R-Drop` regularization, sharpness-aware optimization with `SAM`, `ASAM`, and `GSAM`, link prediction uniform / hard-negative / candidate-set sampling, random edge splitting, and neighbor-subgraph sampling with optional seed-edge exclusion, raw and filtered ranking evaluation metrics such as `MRR` and `Hits@K`, epoch-wise or step-wise LR scheduling including built-in warmup/cosine support and schedulers such as `OneCycleLR`, mixed precision, and training callbacks such as model checkpointing (including optional exception checkpointing), gradual unfreezing, deferred reweighting (`DRW`), EMA, SWA, and Lookahead.
 - **Multiple graph tasks** — node classification, graph classification, link prediction, and temporal event prediction out of the box.
-- **PyG & DGL compatibility** — bidirectional adapters for PyG data plus homogeneous, heterogeneous, and temporal DGL round-trips that preserve canonical edge types and temporal `time_attr` metadata.
+- **PyG & DGL compatibility** — bidirectional adapters for PyG data plus homogeneous, heterogeneous, and temporal DGL graph round-trips that preserve canonical edge types and temporal `time_attr` metadata, along with single-relation `Block` <-> DGL block conversion for message-flow frontiers.
 - **Clean, modular design** — domain-oriented package layout that separates concerns and stays easy to extend.
 
 ---
@@ -372,7 +372,7 @@ pip install -e .
 pip install -e ".[dev]"    # adds pytest, ruff, mypy
 ```
 
-Simple homogeneous graphs stay on DGL's lightweight `dgl.graph(...)` path. Typed or temporal VGL graphs export through `dgl.heterograph(...)` so canonical edge types survive, and temporal round-trips preserve `Graph.schema.time_attr` through the adapter-owned `vgl_time_attr` graph attribute.
+Simple homogeneous graphs stay on DGL's lightweight `dgl.graph(...)` path. Typed or temporal VGL graphs export through `dgl.heterograph(...)` so canonical edge types survive, and temporal round-trips preserve `Graph.schema.time_attr` through the adapter-owned `vgl_time_attr` graph attribute. Relation-local VGL `Block` objects now also round-trip through dedicated single-relation DGL block helpers.
 
 ---
 
@@ -423,16 +423,22 @@ VGL provides bidirectional conversion with the two most popular graph learning l
 
 ```python
 from vgl.compat.pyg import from_pyg, to_pyg
-from vgl.compat.dgl import from_dgl, to_dgl
+from vgl.compat.dgl import block_from_dgl, block_to_dgl, from_dgl, to_dgl
+from vgl.graph import Block
 
-vgl_graph = from_pyg(pyg_data)       # PyG Data → VGL Graph
-pyg_data  = to_pyg(vgl_graph)        # VGL Graph → PyG Data
+vgl_graph = from_pyg(pyg_data)          # PyG Data → VGL Graph
+pyg_data  = to_pyg(vgl_graph)           # VGL Graph → PyG Data
 
-vgl_graph = from_dgl(dgl_graph)      # DGL graph / heterograph → VGL Graph
-dgl_graph = to_dgl(vgl_graph)        # VGL Graph → DGL graph / heterograph
+vgl_graph = from_dgl(dgl_graph)         # DGL graph / heterograph → VGL Graph
+dgl_graph = to_dgl(vgl_graph)           # VGL Graph → DGL graph / heterograph
+
+vgl_block = block_from_dgl(dgl_block)   # single-relation DGL block → VGL Block
+dgl_block = block_to_dgl(vgl_block)     # VGL Block → single-relation DGL block
+dgl_block = vgl_block.to_dgl()          # convenience API
+vgl_block = Block.from_dgl(dgl_block)   # convenience API
 ```
 
-Simple homogeneous graphs stay on `dgl.graph(...)`. Typed or temporal VGL graphs export through `dgl.heterograph(...)` so canonical edge types survive, and temporal round-trips preserve `Graph.schema.time_attr` through the adapter-owned `vgl_time_attr` graph attribute.
+Simple homogeneous graphs stay on `dgl.graph(...)`. Typed or temporal VGL graphs export through `dgl.heterograph(...)` so canonical edge types survive, and temporal round-trips preserve `Graph.schema.time_attr` through the adapter-owned `vgl_time_attr` graph attribute. Graph adapters remain graph-only; message-flow frontiers use `block_from_dgl(...)`, `block_to_dgl(...)`, `Block.from_dgl(...)`, or `Block.to_dgl()`, and only single-relation DGL blocks are supported because one VGL `Block` is relation-local.
 
 ---
 

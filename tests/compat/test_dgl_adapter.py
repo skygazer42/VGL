@@ -1,10 +1,11 @@
 import sys
 import types
 
+import pytest
 import torch
 
 from vgl import Graph
-from vgl.graph import GraphSchema
+from vgl.graph import Block, GraphSchema
 from vgl.storage import FeatureStore, InMemoryGraphStore, InMemoryTensorStore
 
 
@@ -50,6 +51,97 @@ class FakeDGLGraph:
         return self._num_nodes
 
 
+class FakeDGLBlockNodeAccessor:
+    def __init__(self, frames):
+        self._frames = frames
+
+    def __getitem__(self, node_type):
+        return self._frames[node_type]
+
+
+class FakeDGLBlock:
+    is_block = True
+
+    def __init__(self, data_dict, num_src_nodes=None, num_dst_nodes=None):
+        self._edges = {tuple(edge_type): tuple(edge_pair) for edge_type, edge_pair in data_dict.items()}
+        self.canonical_etypes = tuple(self._edges)
+        src_types = []
+        dst_types = []
+        for src_type, _, dst_type in self.canonical_etypes:
+            if src_type not in src_types:
+                src_types.append(src_type)
+            if dst_type not in dst_types:
+                dst_types.append(dst_type)
+        self.srctypes = tuple(src_types)
+        self.dsttypes = tuple(dst_types)
+        self.ntypes = tuple(dict.fromkeys(src_types + dst_types))
+
+        inferred_src = {node_type: 0 for node_type in self.srctypes}
+        inferred_dst = {node_type: 0 for node_type in self.dsttypes}
+        for edge_type, (src, dst) in self._edges.items():
+            src_type, _, dst_type = edge_type
+            if src.numel() > 0:
+                inferred_src[src_type] = max(inferred_src[src_type], int(src.max().item()) + 1)
+            if dst.numel() > 0:
+                inferred_dst[dst_type] = max(inferred_dst[dst_type], int(dst.max().item()) + 1)
+
+        self._num_src_nodes = dict(inferred_src)
+        self._num_dst_nodes = dict(inferred_dst)
+        if num_src_nodes is not None:
+            if isinstance(num_src_nodes, dict):
+                self._num_src_nodes.update({str(key): int(value) for key, value in num_src_nodes.items()})
+            else:
+                if len(self.srctypes) != 1:
+                    raise TypeError('num_src_nodes dict is required for heterogeneous fake blocks')
+                self._num_src_nodes[self.srctypes[0]] = int(num_src_nodes)
+        if num_dst_nodes is not None:
+            if isinstance(num_dst_nodes, dict):
+                self._num_dst_nodes.update({str(key): int(value) for key, value in num_dst_nodes.items()})
+            else:
+                if len(self.dsttypes) != 1:
+                    raise TypeError('num_dst_nodes dict is required for heterogeneous fake blocks')
+                self._num_dst_nodes[self.dsttypes[0]] = int(num_dst_nodes)
+
+        self._src_node_frames = {node_type: FakeDGLDataView() for node_type in self.srctypes}
+        self._dst_node_frames = {node_type: FakeDGLDataView() for node_type in self.dsttypes}
+        self._edge_frames = {edge_type: FakeDGLDataView() for edge_type in self.canonical_etypes}
+        self.srcnodes = FakeDGLBlockNodeAccessor(self._src_node_frames)
+        self.dstnodes = FakeDGLBlockNodeAccessor(self._dst_node_frames)
+        self.edges = FakeDGLEdgeAccessor(self)
+
+    @property
+    def srcdata(self):
+        if len(self.srctypes) != 1:
+            raise TypeError('srcdata is only available for homogeneous fake blocks')
+        return self._src_node_frames[self.srctypes[0]].data
+
+    @property
+    def dstdata(self):
+        if len(self.dsttypes) != 1:
+            raise TypeError('dstdata is only available for homogeneous fake blocks')
+        return self._dst_node_frames[self.dsttypes[0]].data
+
+    @property
+    def edata(self):
+        if len(self.canonical_etypes) != 1:
+            raise TypeError('edata is only available for single-relation fake blocks')
+        return self._edge_frames[self.canonical_etypes[0]].data
+
+    def num_src_nodes(self, node_type=None):
+        if node_type is None:
+            if len(self.srctypes) != 1:
+                raise TypeError('node_type is required for heterogeneous fake blocks')
+            node_type = self.srctypes[0]
+        return self._num_src_nodes[node_type]
+
+    def num_dst_nodes(self, node_type=None):
+        if node_type is None:
+            if len(self.dsttypes) != 1:
+                raise TypeError('node_type is required for heterogeneous fake blocks')
+            node_type = self.dsttypes[0]
+        return self._num_dst_nodes[node_type]
+
+
 class FakeDGLHeteroGraph:
     def __init__(self, data_dict, num_nodes_dict=None):
         self._edges = {tuple(edge_type): tuple(edge_pair) for edge_type, edge_pair in data_dict.items()}
@@ -86,8 +178,19 @@ class FakeDGLHeteroGraph:
 
 def _install_fake_dgl(monkeypatch):
     dgl_module = types.ModuleType('dgl')
+    dgl_module.NID = 'dgl.NID'
+    dgl_module.EID = 'dgl.EID'
     dgl_module.graph = lambda edges, num_nodes=None: FakeDGLGraph(edges, num_nodes=num_nodes)
     dgl_module.heterograph = lambda data_dict, num_nodes_dict=None: FakeDGLHeteroGraph(data_dict, num_nodes_dict=num_nodes_dict)
+
+    def _create_block(data_dict, num_src_nodes=None, num_dst_nodes=None):
+        if isinstance(data_dict, dict):
+            normalized = data_dict
+        else:
+            normalized = {('_N', '_E', '_N'): data_dict}
+        return FakeDGLBlock(normalized, num_src_nodes=num_src_nodes, num_dst_nodes=num_dst_nodes)
+
+    dgl_module.create_block = _create_block
     monkeypatch.setitem(sys.modules, 'dgl', dgl_module)
     return dgl_module
 
@@ -216,3 +319,120 @@ def test_storage_backed_graph_with_sparse_cache_round_trips_to_dgl(monkeypatch):
     assert torch.equal(restored.ndata['n_id'], graph.ndata['n_id'])
     assert torch.equal(restored.edata['e_id'], graph.edata['e_id'])
     assert torch.equal(restored.edge_index, graph.edge_index)
+
+
+
+def test_homo_block_round_trips_to_dgl_block(monkeypatch):
+    _install_fake_dgl(monkeypatch)
+
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2, 1], [1, 2, 1, 0]]),
+        x=torch.tensor([[1.0], [2.0], [3.0]]),
+        n_id=torch.tensor([10, 11, 12]),
+        edge_data={
+            'e_id': torch.tensor([20, 21, 22, 23]),
+            'weight': torch.tensor([0.5, 0.6, 0.7, 0.8]),
+        },
+    )
+
+    block = graph.to_block(torch.tensor([1, 2]))
+
+    dgl_block = block.to_dgl()
+    restored = Block.from_dgl(dgl_block)
+
+    assert getattr(dgl_block, 'is_block', False)
+    assert restored.edge_type == block.edge_type
+    assert restored.src_type == block.src_type
+    assert restored.dst_type == block.dst_type
+    assert torch.equal(restored.src_n_id, block.src_n_id)
+    assert torch.equal(restored.dst_n_id, block.dst_n_id)
+    assert torch.equal(restored.srcdata['x'], block.srcdata['x'])
+    assert torch.equal(restored.dstdata['x'], block.dstdata['x'])
+    assert torch.equal(restored.edata['e_id'], block.edata['e_id'])
+    assert torch.equal(restored.edata['weight'], block.edata['weight'])
+    assert torch.equal(restored.edge_index, block.edge_index)
+
+
+
+def test_relation_local_hetero_block_round_trips_to_dgl_block(monkeypatch):
+    _install_fake_dgl(monkeypatch)
+
+    writes = ('author', 'writes', 'paper')
+    graph = Graph.hetero(
+        nodes={
+            'author': {'x': torch.tensor([[10.0], [20.0]])},
+            'paper': {'x': torch.tensor([[1.0], [2.0], [3.0]])},
+        },
+        edges={
+            writes: {
+                'edge_index': torch.tensor([[0, 1, 1], [1, 0, 2]]),
+                'e_id': torch.tensor([30, 31, 32]),
+                'weight': torch.tensor([1.0, 2.0, 3.0]),
+            }
+        },
+    )
+
+    block = graph.to_block(torch.tensor([0, 2]), edge_type=writes)
+
+    dgl_block = block.to_dgl()
+    restored = Block.from_dgl(dgl_block)
+
+    assert getattr(dgl_block, 'is_block', False)
+    assert restored.edge_type == writes
+    assert restored.src_type == 'author'
+    assert restored.dst_type == 'paper'
+    assert torch.equal(restored.src_n_id, block.src_n_id)
+    assert torch.equal(restored.dst_n_id, block.dst_n_id)
+    assert torch.equal(restored.srcdata['x'], block.srcdata['x'])
+    assert torch.equal(restored.dstdata['x'], block.dstdata['x'])
+    assert torch.equal(restored.edata['e_id'], block.edata['e_id'])
+    assert torch.equal(restored.edata['weight'], block.edata['weight'])
+    assert torch.equal(restored.edge_index, block.edge_index)
+
+
+
+def test_from_dgl_imports_external_single_relation_block(monkeypatch):
+    dgl_module = _install_fake_dgl(monkeypatch)
+
+    follows = ('user', 'follows', 'user')
+    dgl_block = dgl_module.create_block(
+        {follows: (torch.tensor([2, 0, 1]), torch.tensor([0, 1, 0]))},
+        num_src_nodes={'user': 3},
+        num_dst_nodes={'user': 2},
+    )
+    dgl_block.srcnodes['user'].data['n_id'] = torch.tensor([11, 12, 10])
+    dgl_block.dstnodes['user'].data['n_id'] = torch.tensor([11, 12])
+    dgl_block.srcnodes['user'].data['x'] = torch.tensor([[2.0], [3.0], [1.0]])
+    dgl_block.dstnodes['user'].data['x'] = torch.tensor([[2.0], [3.0]])
+    dgl_block.edges[follows].data['e_id'] = torch.tensor([40, 41, 42])
+    dgl_block.edges[follows].data['weight'] = torch.tensor([0.5, 0.6, 0.7])
+
+    block = Block.from_dgl(dgl_block)
+
+    assert block.edge_type == follows
+    assert block.src_type == 'user'
+    assert block.dst_type == 'user'
+    assert torch.equal(block.src_n_id, torch.tensor([11, 12, 10]))
+    assert torch.equal(block.dst_n_id, torch.tensor([11, 12]))
+    assert torch.equal(block.srcdata['x'], torch.tensor([[2.0], [3.0], [1.0]]))
+    assert torch.equal(block.dstdata['x'], torch.tensor([[2.0], [3.0]]))
+    assert torch.equal(block.edata['e_id'], torch.tensor([40, 41, 42]))
+    assert torch.equal(block.edata['weight'], torch.tensor([0.5, 0.6, 0.7]))
+    assert torch.equal(block.edge_index, torch.tensor([[2, 0, 1], [0, 1, 0]]))
+
+
+
+def test_from_dgl_rejects_multi_relation_blocks(monkeypatch):
+    dgl_module = _install_fake_dgl(monkeypatch)
+
+    dgl_block = dgl_module.create_block(
+        {
+            ('author', 'writes', 'paper'): (torch.tensor([0]), torch.tensor([0])),
+            ('paper', 'cites', 'paper'): (torch.tensor([0]), torch.tensor([0])),
+        },
+        num_src_nodes={'author': 1, 'paper': 1},
+        num_dst_nodes={'paper': 1},
+    )
+
+    with pytest.raises(ValueError, match='single-relation'):
+        Block.from_dgl(dgl_block)
