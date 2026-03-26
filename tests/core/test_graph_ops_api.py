@@ -124,3 +124,21 @@ def test_graph_query_and_reverse_bridges_call_ops_layer():
     assert torch.equal(connected, torch.tensor([True, False]))
     assert torch.equal(reversed_graph.edge_index, torch.tensor([[1, 1, 2, 0], [0, 0, 1, 2]]))
     assert torch.equal(reversed_graph.edata["e_id"], torch.tensor([0, 1, 2, 3]))
+
+
+def test_graph_adjacency_query_bridges_call_ops_layer():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 0, 1, 1], [1, 1, 2, 2]]),
+        x=torch.tensor([[1.0], [2.0], [3.0]]),
+    )
+
+    in_src, in_dst = graph.in_edges(torch.tensor([1]))
+    out_eids = graph.out_edges(torch.tensor([1]), form="eid")
+    preds = graph.predecessors(1)
+    succs = graph.successors(1)
+
+    assert torch.equal(in_src, torch.tensor([0, 0]))
+    assert torch.equal(in_dst, torch.tensor([1, 1]))
+    assert torch.equal(out_eids, torch.tensor([2, 3]))
+    assert torch.equal(preds, torch.tensor([0, 0]))
+    assert torch.equal(succs, torch.tensor([2, 2]))

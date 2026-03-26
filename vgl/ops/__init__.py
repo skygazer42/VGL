@@ -11,6 +11,10 @@ from vgl.ops.pipeline import TransformPipeline as TransformPipeline
 from vgl.ops.query import edge_ids as edge_ids
 from vgl.ops.query import find_edges as find_edges
 from vgl.ops.query import has_edges_between as has_edges_between
+from vgl.ops.query import in_edges as in_edges
+from vgl.ops.query import out_edges as out_edges
+from vgl.ops.query import predecessors as predecessors
+from vgl.ops.query import successors as successors
 from vgl.ops.structure import add_self_loops as add_self_loops
 from vgl.ops.structure import remove_self_loops as remove_self_loops
 from vgl.ops.structure import reverse as reverse
@@ -34,6 +38,10 @@ __all__ = [
     "find_edges",
     "edge_ids",
     "has_edges_between",
+    "in_edges",
+    "out_edges",
+    "predecessors",
+    "successors",
     "node_subgraph",
     "edge_subgraph",
     "in_subgraph",

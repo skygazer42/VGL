@@ -42,14 +42,52 @@ def _normalize_node_pairs(u, v) -> tuple[torch.Tensor, torch.Tensor, bool]:
     return u_ids, v_ids, scalar_input
 
 
+def _normalize_node_ids(nodes) -> torch.Tensor:
+    return torch.as_tensor(nodes, dtype=torch.long).view(-1)
+
+
+def _normalize_single_node(node, *, name: str) -> int:
+    node_tensor = torch.as_tensor(node, dtype=torch.long)
+    if node_tensor.numel() != 1:
+        raise ValueError(f"{name} requires a single node id")
+    return int(node_tensor.view(-1)[0])
+
+
+def _validate_node_ids(graph: Graph, node_type: str, node_ids: torch.Tensor, *, role: str) -> None:
+    count = graph._node_count(node_type)
+    if torch.any((node_ids < 0) | (node_ids >= count)):
+        raise ValueError(f"{role} node ids are out of range")
+
+
 def _validate_node_pairs(graph: Graph, edge_type, u_ids: torch.Tensor, v_ids: torch.Tensor) -> None:
     src_type, _, dst_type = edge_type
-    src_count = graph._node_count(src_type)
-    dst_count = graph._node_count(dst_type)
-    if torch.any((u_ids < 0) | (u_ids >= src_count)):
-        raise ValueError("source node ids are out of range")
-    if torch.any((v_ids < 0) | (v_ids >= dst_count)):
-        raise ValueError("destination node ids are out of range")
+    _validate_node_ids(graph, src_type, u_ids, role="source")
+    _validate_node_ids(graph, dst_type, v_ids, role="destination")
+
+
+def _edge_positions_for_endpoint(graph: Graph, edge_type, nodes, *, endpoint: int) -> tuple[object, torch.Tensor]:
+    store = graph.edges[edge_type]
+    node_ids = _normalize_node_ids(nodes)
+    node_type = edge_type[0] if endpoint == 0 else edge_type[2]
+    role = "source" if endpoint == 0 else "destination"
+    _validate_node_ids(graph, node_type, node_ids, role=role)
+    if node_ids.numel() == 0:
+        return store, torch.empty(0, dtype=torch.long, device=store.edge_index.device)
+    device_nodes = node_ids.to(device=store.edge_index.device)
+    mask = torch.isin(store.edge_index[endpoint], device_nodes)
+    return store, torch.nonzero(mask, as_tuple=False).view(-1)
+
+
+def _format_edge_selection(store, positions: torch.Tensor, *, form: str):
+    if form not in {"uv", "eid", "all"}:
+        raise ValueError("form must be one of 'uv', 'eid', or 'all'")
+    edge_index = store.edge_index[:, positions] if positions.numel() > 0 else store.edge_index[:, :0]
+    edge_ids = _public_edge_ids(store)[positions]
+    if form == "uv":
+        return edge_index[0], edge_index[1]
+    if form == "eid":
+        return edge_ids
+    return edge_index[0], edge_index[1], edge_ids
 
 
 def find_edges(graph: Graph, eids, *, edge_type=None) -> tuple[torch.Tensor, torch.Tensor]:
@@ -117,3 +155,33 @@ def has_edges_between(graph: Graph, u, v, *, edge_type=None):
     if scalar_input:
         return bool(exists[0])
     return torch.tensor(exists, dtype=torch.bool, device=store.edge_index.device)
+
+
+def in_edges(graph: Graph, v, *, form: str = "uv", edge_type=None):
+    edge_type = _resolve_edge_type(graph, edge_type)
+    store, positions = _edge_positions_for_endpoint(graph, edge_type, v, endpoint=1)
+    return _format_edge_selection(store, positions, form=form)
+
+
+def out_edges(graph: Graph, u, *, form: str = "uv", edge_type=None):
+    edge_type = _resolve_edge_type(graph, edge_type)
+    store, positions = _edge_positions_for_endpoint(graph, edge_type, u, endpoint=0)
+    return _format_edge_selection(store, positions, form=form)
+
+
+def predecessors(graph: Graph, v, *, edge_type=None) -> torch.Tensor:
+    edge_type = _resolve_edge_type(graph, edge_type)
+    node_id = _normalize_single_node(v, name="predecessors")
+    store, positions = _edge_positions_for_endpoint(graph, edge_type, torch.tensor([node_id]), endpoint=1)
+    if positions.numel() == 0:
+        return torch.empty(0, dtype=store.edge_index.dtype, device=store.edge_index.device)
+    return store.edge_index[0, positions]
+
+
+def successors(graph: Graph, v, *, edge_type=None) -> torch.Tensor:
+    edge_type = _resolve_edge_type(graph, edge_type)
+    node_id = _normalize_single_node(v, name="successors")
+    store, positions = _edge_positions_for_endpoint(graph, edge_type, torch.tensor([node_id]), endpoint=0)
+    if positions.numel() == 0:
+        return torch.empty(0, dtype=store.edge_index.dtype, device=store.edge_index.device)
+    return store.edge_index[1, positions]

@@ -223,6 +223,26 @@ class Graph:
 
         return out_subgraph(self, nodes)
 
+    def in_edges(self, v, *, form: str = "uv", edge_type=None):
+        from vgl.ops import in_edges
+
+        return in_edges(self, v, form=form, edge_type=edge_type)
+
+    def out_edges(self, u, *, form: str = "uv", edge_type=None):
+        from vgl.ops import out_edges
+
+        return out_edges(self, u, form=form, edge_type=edge_type)
+
+    def predecessors(self, v, *, edge_type=None):
+        from vgl.ops import predecessors
+
+        return predecessors(self, v, edge_type=edge_type)
+
+    def successors(self, v, *, edge_type=None):
+        from vgl.ops import successors
+
+        return successors(self, v, edge_type=edge_type)
+
     def find_edges(self, eids, *, edge_type=None):
         from vgl.ops import find_edges
 
