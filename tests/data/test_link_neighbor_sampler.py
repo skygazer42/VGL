@@ -1,3 +1,4 @@
+import pytest
 import torch
 
 from vgl import Graph
@@ -135,6 +136,97 @@ def test_link_neighbor_sampler_supports_mixed_hetero_edge_types_from_base_sample
     assert records[1].edge_type == cites
     assert all(int(record.src_index) >= 0 for record in records)
     assert all(int(record.dst_index) >= 0 for record in records)
+
+
+def test_link_neighbor_sampler_output_blocks_build_relation_local_hetero_blocks():
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.tensor([[10.0], [20.0], [30.0]])},
+            "paper": {"x": torch.tensor([[1.0], [2.0]])},
+        },
+        edges={
+            WRITES: {
+                "edge_index": torch.tensor([[0, 0, 2], [0, 1, 0]], dtype=torch.long),
+                "edge_weight": torch.tensor([10.0, 11.0, 12.0]),
+            },
+            WRITTEN_BY: {
+                "edge_index": torch.tensor([[0, 1, 0], [0, 0, 2]], dtype=torch.long),
+                "edge_weight": torch.tensor([100.0, 110.0, 120.0]),
+            },
+        },
+    )
+    sampler = LinkNeighborSampler(num_neighbors=[-1, -1], output_blocks=True)
+
+    record = sampler.sample(
+        LinkPredictionRecord(
+            graph=graph,
+            src_index=0,
+            dst_index=0,
+            label=1,
+            edge_type=WRITES,
+        )
+    )
+
+    assert record.blocks is not None
+    assert len(record.blocks) == 2
+    outer_block, inner_block = record.blocks
+    assert outer_block.edge_type == WRITES
+    assert outer_block.src_type == "author"
+    assert outer_block.dst_type == "paper"
+    assert torch.equal(outer_block.dst_n_id, torch.tensor([0, 1], dtype=torch.long))
+    assert torch.equal(outer_block.src_n_id, torch.tensor([0, 2], dtype=torch.long))
+    assert torch.equal(outer_block.edata["e_id"], torch.tensor([0, 1, 2], dtype=torch.long))
+    assert torch.equal(outer_block.edata["edge_weight"], torch.tensor([10.0, 11.0, 12.0]))
+    assert torch.equal(outer_block.srcdata["x"].view(-1), torch.tensor([10.0, 30.0]))
+    assert torch.equal(outer_block.dstdata["x"].view(-1), torch.tensor([1.0, 2.0]))
+    assert torch.equal(inner_block.dst_n_id, torch.tensor([0], dtype=torch.long))
+    assert torch.equal(inner_block.src_n_id, torch.tensor([0, 2], dtype=torch.long))
+    assert torch.equal(inner_block.edata["e_id"], torch.tensor([0, 2], dtype=torch.long))
+    assert torch.equal(inner_block.edata["edge_weight"], torch.tensor([10.0, 12.0]))
+    assert torch.equal(inner_block.dstdata["x"].view(-1), torch.tensor([1.0]))
+
+
+def test_link_neighbor_sampler_output_blocks_reject_mixed_hetero_edge_types_from_base_sampler():
+    cites = ("paper", "cites", "paper")
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.randn(2, 4)},
+            "paper": {"x": torch.randn(4, 4)},
+        },
+        edges={
+            WRITES: {"edge_index": torch.tensor([[0, 1], [1, 2]])},
+            WRITTEN_BY: {"edge_index": torch.tensor([[1, 2], [0, 1]])},
+            cites: {"edge_index": torch.tensor([[0, 2], [2, 3]])},
+        },
+    )
+
+    class MixedEdgeTypeBaseSampler:
+        def sample(self, item):
+            return [
+                LinkPredictionRecord(
+                    graph=item.graph,
+                    src_index=0,
+                    dst_index=1,
+                    label=1,
+                    edge_type=WRITES,
+                ),
+                LinkPredictionRecord(
+                    graph=item.graph,
+                    src_index=2,
+                    dst_index=3,
+                    label=0,
+                    edge_type=cites,
+                ),
+            ]
+
+    sampler = LinkNeighborSampler(
+        num_neighbors=[-1],
+        base_sampler=MixedEdgeTypeBaseSampler(),
+        output_blocks=True,
+    )
+
+    with pytest.raises(ValueError, match="single edge_type"):
+        sampler.sample(LinkPredictionRecord(graph=graph, src_index=0, dst_index=1, label=1, edge_type=WRITES))
 
 
 def test_loader_routes_link_neighbor_sampler_through_plan_execution():
@@ -494,6 +586,76 @@ def test_link_neighbor_sampler_stitched_hetero_link_sampling_crosses_partition_b
     assert torch.equal(batch.labels, torch.tensor([1.0]))
 
 
+def test_link_neighbor_sampler_stitched_hetero_output_blocks_materialize_relation_local_blocks_through_coordinator(tmp_path):
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.tensor([[10.0], [20.0], [30.0]])},
+            "paper": {"x": torch.tensor([[1.0], [2.0]])},
+        },
+        edges={
+            WRITES: {
+                "edge_index": torch.tensor([[0, 0, 2], [0, 1, 0]], dtype=torch.long),
+                "edge_weight": torch.tensor([10.0, 11.0, 12.0]),
+            },
+            WRITTEN_BY: {
+                "edge_index": torch.tensor([[0, 1, 0], [0, 0, 2]], dtype=torch.long),
+                "edge_weight": torch.tensor([100.0, 110.0, 120.0]),
+            },
+        },
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    coordinator = LocalSamplingCoordinator(shards)
+    loader = Loader(
+        dataset=ListDataset(
+            [
+                LinkPredictionRecord(
+                    graph=shards[0].graph,
+                    src_index=0,
+                    dst_index=0,
+                    label=1,
+                    edge_type=WRITES,
+                )
+            ]
+        ),
+        sampler=LinkNeighborSampler(
+            num_neighbors=[-1, -1],
+            node_feature_names={"author": ("x",), "paper": ("x",)},
+            edge_feature_names={WRITES: ("edge_weight",), WRITTEN_BY: ("edge_weight",)},
+            output_blocks=True,
+        ),
+        batch_size=1,
+        feature_store=coordinator,
+    )
+
+    batch = next(iter(loader))
+
+    assert batch.blocks is not None
+    assert len(batch.blocks) == 2
+    outer_block, inner_block = batch.blocks
+    assert batch.edge_type == WRITES
+    assert batch.src_node_type == "author"
+    assert batch.dst_node_type == "paper"
+    assert torch.equal(batch.graph.nodes["author"].n_id, torch.tensor([0, 2], dtype=torch.long))
+    assert torch.equal(batch.graph.nodes["paper"].n_id, torch.tensor([0, 1], dtype=torch.long))
+    assert torch.equal(batch.graph.nodes["author"].x.view(-1), torch.tensor([10.0, 30.0]))
+    assert torch.equal(batch.graph.nodes["paper"].x.view(-1), torch.tensor([1.0, 2.0]))
+    assert outer_block.edge_type == WRITES
+    assert torch.equal(outer_block.dst_n_id, torch.tensor([0, 1], dtype=torch.long))
+    assert torch.equal(outer_block.src_n_id, torch.tensor([0, 2], dtype=torch.long))
+    assert torch.equal(outer_block.edata["e_id"], torch.tensor([0, 1, 2], dtype=torch.long))
+    assert torch.equal(outer_block.edata["edge_weight"], torch.tensor([10.0, 11.0, 12.0]))
+    assert torch.equal(outer_block.srcdata["x"].view(-1), torch.tensor([10.0, 30.0]))
+    assert torch.equal(outer_block.dstdata["x"].view(-1), torch.tensor([1.0, 2.0]))
+    assert torch.equal(inner_block.dst_n_id, torch.tensor([0], dtype=torch.long))
+    assert torch.equal(inner_block.src_n_id, torch.tensor([0, 2], dtype=torch.long))
+    assert torch.equal(inner_block.edata["e_id"], torch.tensor([0, 2], dtype=torch.long))
+    assert torch.equal(inner_block.edata["edge_weight"], torch.tensor([10.0, 12.0]))
+
+
 def test_link_neighbor_sampler_output_blocks_preserve_order_and_global_ids():
     graph = Graph.homo(
         edge_index=torch.tensor([[0, 1, 3, 2], [1, 2, 2, 3]], dtype=torch.long),
@@ -586,28 +748,30 @@ def test_loader_materializes_link_prediction_batch_blocks_for_homogeneous_sampli
 
 
 
-def test_link_neighbor_sampler_rejects_block_output_for_heterogeneous_graphs():
-    import pytest
-
+def test_link_neighbor_sampler_output_blocks_keep_fixed_hop_count_for_hetero_sampling():
     graph = Graph.hetero(
         nodes={
-            "author": {"x": torch.randn(2, 4)},
-            "paper": {"x": torch.randn(3, 4)},
+            "author": {"x": torch.randn(3, 4)},
+            "paper": {"x": torch.randn(2, 4)},
         },
         edges={
-            WRITES: {"edge_index": torch.tensor([[0, 1], [1, 2]], dtype=torch.long)},
-            WRITTEN_BY: {"edge_index": torch.tensor([[1, 2], [0, 1]], dtype=torch.long)},
+            WRITES: {"edge_index": torch.tensor([[0, 2], [0, 0]], dtype=torch.long)},
+            WRITTEN_BY: {"edge_index": torch.tensor([[0, 0], [0, 2]], dtype=torch.long)},
         },
     )
-    sampler = LinkNeighborSampler(num_neighbors=[-1], output_blocks=True)
+    sampler = LinkNeighborSampler(num_neighbors=[-1, -1], output_blocks=True)
 
-    with pytest.raises(ValueError, match="homogeneous"):
-        sampler.sample(
-            LinkPredictionRecord(
-                graph=graph,
-                src_index=0,
-                dst_index=1,
-                label=1,
-                edge_type=WRITES,
-            )
+    record = sampler.sample(
+        LinkPredictionRecord(
+            graph=graph,
+            src_index=0,
+            dst_index=0,
+            label=1,
+            edge_type=WRITES,
         )
+    )
+
+    assert record.blocks is not None
+    assert len(record.blocks) == 2
+    assert torch.equal(record.blocks[0].dst_n_id, torch.tensor([0], dtype=torch.long))
+    assert torch.equal(record.blocks[1].dst_n_id, torch.tensor([0], dtype=torch.long))

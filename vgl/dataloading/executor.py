@@ -431,7 +431,8 @@ def _expand_stitched_hetero_global_node_ids(
     edge_types,
     fanouts,
     generator=None,
-) -> dict[str, torch.Tensor]:
+    return_hops: bool = False,
+) -> dict[str, torch.Tensor] | tuple[dict[str, torch.Tensor], list[dict[str, torch.Tensor]]]:
     normalized_seeds = {
         node_type: torch.as_tensor(node_ids, dtype=torch.long).view(-1)
         for node_type, node_ids in seed_global_ids_by_type.items()
@@ -454,6 +455,14 @@ def _expand_stitched_hetero_global_node_ids(
         for node_type, node_ids in visited_by_type.items()
         if node_ids
     }
+    hop_nodes = None
+    if return_hops:
+        hop_nodes = [
+            {
+                node_type: torch.tensor(sorted(values), dtype=torch.long, device=device)
+                for node_type, values in visited_by_type.items()
+            }
+        ]
     for fanout in fanouts:
         candidate_nodes = _stitched_hetero_frontier_candidates(
             source,
@@ -472,14 +481,24 @@ def _expand_stitched_hetero_global_node_ids(
             frontier_tensor = torch.tensor(values, dtype=torch.long, device=device)
             next_frontier[node_type] = frontier_tensor
             visited_by_type[node_type].update(int(node) for node in frontier_tensor.tolist())
-        if not next_frontier:
+        if hop_nodes is not None:
+            hop_nodes.append(
+                {
+                    node_type: torch.tensor(sorted(values), dtype=torch.long, device=device)
+                    for node_type, values in visited_by_type.items()
+                }
+            )
+        elif not next_frontier:
             break
         frontier_by_type = next_frontier
 
-    return {
+    expanded = {
         node_type: torch.tensor(sorted(values), dtype=torch.long, device=device)
         for node_type, values in visited_by_type.items()
     }
+    if hop_nodes is not None:
+        return expanded, hop_nodes
+    return expanded
 
 
 def _expand_stitched_hetero_node_ids(
@@ -1773,16 +1792,26 @@ class PlanExecutor:
                 context.state["link_node_ids_local"] = stitched_graph.n_id
                 context.state["link_node_hops"] = link_node_hops
         elif stitched_hetero_partition is not None:
-            if output_blocks:
-                raise ValueError("LinkNeighborSampler output_blocks currently supports homogeneous link sampling only")
             seed_global_ids_by_type = _stitched_hetero_link_seed_global_ids(graph, records)
-            node_ids_by_type = _expand_stitched_hetero_global_node_ids(
-                context.feature_store,
-                seed_global_ids_by_type,
-                edge_types=tuple(graph.edges),
-                fanouts=sampler.num_neighbors,
-                generator=getattr(sampler, "_generator", None),
-            )
+            if output_blocks:
+                node_ids_by_type, link_node_hops_by_type = _expand_stitched_hetero_global_node_ids(
+                    context.feature_store,
+                    seed_global_ids_by_type,
+                    edge_types=tuple(graph.edges),
+                    fanouts=sampler.num_neighbors,
+                    generator=getattr(sampler, "_generator", None),
+                    return_hops=True,
+                )
+                context.state["link_node_hops_by_type"] = link_node_hops_by_type
+                context.state["link_block_edge_type"] = _resolve_link_record_edge_type(records[0])
+            else:
+                node_ids_by_type = _expand_stitched_hetero_global_node_ids(
+                    context.feature_store,
+                    seed_global_ids_by_type,
+                    edge_types=tuple(graph.edges),
+                    fanouts=sampler.num_neighbors,
+                    generator=getattr(sampler, "_generator", None),
+                )
             edge_ids_by_type, edge_index_by_type = _collect_stitched_hetero_edges(
                 context.feature_store,
                 node_ids_by_type,
@@ -1799,13 +1828,12 @@ class PlanExecutor:
             sampled = sampled_records if bool(stage.params["is_sequence"]) else sampled_records[0]
         else:
             if output_blocks:
-                sampled, link_node_ids_local, link_node_hops = sampler._sample_from_seed_records(
+                sampled, block_state = sampler._sample_from_seed_records(
                     records,
                     is_sequence=bool(stage.params["is_sequence"]),
                     return_hops=True,
                 )
-                context.state["link_node_ids_local"] = link_node_ids_local
-                context.state["link_node_hops"] = link_node_hops
+                context.state.update(block_state)
             else:
                 sampled = sampler._sample_from_seed_records(records, is_sequence=bool(stage.params["is_sequence"]))
         if isinstance(sampled, (list, tuple)):

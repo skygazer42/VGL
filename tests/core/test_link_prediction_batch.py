@@ -4,6 +4,7 @@ import torch
 from vgl import Graph
 from vgl.core.batch import LinkPredictionBatch
 from vgl.data.sample import LinkPredictionRecord
+from vgl.ops import to_block
 
 
 def _graph():
@@ -225,6 +226,46 @@ def test_link_prediction_batch_supports_mixed_hetero_edge_types():
     assert torch.equal(batch.edge_type_index, torch.tensor([0, 1]))
     assert torch.equal(batch.src_index, torch.tensor([0, 2]))
     assert torch.equal(batch.dst_index, torch.tensor([1, 3]))
+
+
+def test_link_prediction_batch_rejects_block_batches_with_mixed_hetero_edge_types():
+    writes = ("author", "writes", "paper")
+    cites = ("paper", "cites", "paper")
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.randn(2, 4)},
+            "paper": {"x": torch.randn(4, 4)},
+        },
+        edges={
+            writes: {"edge_index": torch.tensor([[0, 1], [1, 2]])},
+            ("paper", "written_by", "author"): {"edge_index": torch.tensor([[1, 2], [0, 1]])},
+            cites: {"edge_index": torch.tensor([[0, 2], [2, 3]])},
+        },
+    )
+    writes_block = to_block(graph, torch.tensor([1]), edge_type=writes)
+    cites_block = to_block(graph, torch.tensor([2, 3]), edge_type=cites)
+
+    with pytest.raises(ValueError, match="single edge_type"):
+        LinkPredictionBatch.from_records(
+            [
+                LinkPredictionRecord(
+                    graph=graph,
+                    src_index=0,
+                    dst_index=1,
+                    label=1,
+                    edge_type=writes,
+                    blocks=[writes_block],
+                ),
+                LinkPredictionRecord(
+                    graph=graph,
+                    src_index=2,
+                    dst_index=3,
+                    label=0,
+                    edge_type=cites,
+                    blocks=[cites_block],
+                ),
+            ]
+        )
 
 
 def test_link_prediction_batch_excludes_seed_edges_for_each_relation_in_mixed_hetero_batch():

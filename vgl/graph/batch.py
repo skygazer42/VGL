@@ -632,6 +632,8 @@ class LinkPredictionBatch:
         edge_types = tuple(dict.fromkeys(record_edge_types))
         edge_type_to_index = {edge_type: index for index, edge_type in enumerate(edge_types)}
         edge_type_index = torch.tensor([edge_type_to_index[edge_type] for edge_type in record_edge_types], dtype=torch.long)
+        if len(edge_types) > 1 and any(record.blocks is not None for record in records):
+            raise ValueError("LinkPredictionBatch blocks require a single edge_type")
 
         is_homo = set(first_graph.nodes) == {"node"} and len(first_graph.edges) == 1
         if is_homo:

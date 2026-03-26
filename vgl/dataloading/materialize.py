@@ -4,7 +4,14 @@ import torch
 
 from vgl.dataloading.executor import MaterializationContext
 from vgl.dataloading.records import LinkPredictionRecord, SampleRecord, TemporalEventRecord
-from vgl.graph.batch import GraphBatch, LinkPredictionBatch, NodeBatch, TemporalEventBatch, _without_supervision_edges
+from vgl.graph.batch import (
+    GraphBatch,
+    LinkPredictionBatch,
+    NodeBatch,
+    TemporalEventBatch,
+    _without_supervision_edges,
+    _without_supervision_edges_for_type,
+)
 from vgl.graph.graph import Graph
 from vgl.ops.block import to_block
 
@@ -230,27 +237,74 @@ def _build_homo_blocks_from_local_ids(subgraph: Graph, node_ids_local: torch.Ten
     return [to_block(subgraph, dst_nodes) for dst_nodes in subgraph_hops[-2::-1]]
 
 
+def _build_hetero_blocks_from_local_ids(
+    subgraph: Graph,
+    node_hops_by_type: list[dict[str, torch.Tensor]],
+    *,
+    edge_type,
+):
+    dst_type = edge_type[2]
+    dst_node_ids = subgraph.nodes[dst_type].data.get("n_id")
+    if dst_node_ids is None:
+        node_count = subgraph._node_count(dst_type)
+        device = next(iter(subgraph.nodes[dst_type].data.values())).device
+        dst_node_ids = torch.arange(node_count, dtype=torch.long, device=device)
+    dst_node_ids = torch.as_tensor(dst_node_ids, dtype=torch.long).view(-1)
+    positions = {int(node_id): index for index, node_id in enumerate(dst_node_ids.tolist())}
+    subgraph_hops = []
+    for hop_nodes in node_hops_by_type:
+        hop_node_ids = torch.as_tensor(hop_nodes.get(dst_type, ()), dtype=torch.long).view(-1)
+        subgraph_hops.append(
+            torch.tensor(
+                [positions[int(node_id)] for node_id in hop_node_ids.tolist()],
+                dtype=torch.long,
+                device=dst_node_ids.device,
+            )
+        )
+    return [to_block(subgraph, dst_nodes, edge_type=edge_type) for dst_nodes in subgraph_hops[-2::-1]]
+
+
 def _link_message_passing_graph(graph: Graph, records: list[LinkPredictionRecord]) -> Graph:
-    supervision_edges = set()
+    supervision_edges_by_type = {}
+    reverse_supervision_edges = {}
     for record in records:
         if int(record.label) != 1:
             continue
         if not (bool(getattr(record, "exclude_seed_edge", False)) or bool(record.metadata.get("exclude_seed_edges", False))):
             continue
-        supervision_edges.add((int(record.src_index), int(record.dst_index)))
+        edge_type = getattr(record, "edge_type", None) or record.metadata.get("edge_type")
+        if edge_type is None:
+            edge_type = graph._default_edge_type()
+        edge_type = tuple(edge_type)
+        supervision_edges_by_type.setdefault(edge_type, set()).add((int(record.src_index), int(record.dst_index)))
         reverse_edge_type = getattr(record, "reverse_edge_type", None)
         if reverse_edge_type is None:
             reverse_edge_type = record.metadata.get("reverse_edge_type")
         if reverse_edge_type is not None:
-            supervision_edges.add((int(record.dst_index), int(record.src_index)))
-    return _without_supervision_edges(graph, supervision_edges)
+            reverse_edge_type = tuple(reverse_edge_type)
+            reverse_supervision_edges.setdefault(reverse_edge_type, set()).add((int(record.dst_index), int(record.src_index)))
+    if set(graph.nodes) == {"node"} and len(graph.edges) == 1:
+        supervision_edges = supervision_edges_by_type.get(graph._default_edge_type(), set())
+        if reverse_supervision_edges:
+            supervision_edges = set(supervision_edges)
+            for reverse_edges in reverse_supervision_edges.values():
+                supervision_edges.update(reverse_edges)
+        return _without_supervision_edges(graph, supervision_edges)
+    message_passing_graph = graph
+    for edge_type, supervision_edges in supervision_edges_by_type.items():
+        message_passing_graph = _without_supervision_edges_for_type(message_passing_graph, edge_type, supervision_edges)
+    for edge_type, supervision_edges in reverse_supervision_edges.items():
+        message_passing_graph = _without_supervision_edges_for_type(message_passing_graph, edge_type, supervision_edges)
+    return message_passing_graph
 
 
 def _materialize_record_payload(context: MaterializationContext, payload):
     fetched_node_features = context.state.get("_materialized_node_features")
     fetched_edge_features = context.state.get("_materialized_edge_features")
     needs_node_blocks = "node_hops" in context.state
-    needs_link_blocks = "link_node_hops" in context.state and "link_node_ids_local" in context.state
+    needs_homo_link_blocks = "link_node_hops" in context.state and "link_node_ids_local" in context.state
+    needs_hetero_link_blocks = "link_node_hops_by_type" in context.state and "link_block_edge_type" in context.state
+    needs_link_blocks = needs_homo_link_blocks or needs_hetero_link_blocks
     if not fetched_node_features and not fetched_edge_features and not needs_node_blocks and not needs_link_blocks:
         return payload
 
@@ -284,18 +338,23 @@ def _materialize_record_payload(context: MaterializationContext, payload):
         return blocks
 
     def _materialized_link_blocks(records: list[LinkPredictionRecord], graph: Graph):
-        graph_id = id(graph)
-        blocks = link_blocks_cache.get(graph_id)
+        cache_key = (id(graph), context.state.get("link_block_edge_type"))
+        blocks = link_blocks_cache.get(cache_key)
         if blocks is None:
-            if not (set(graph.nodes) == {"node"} and len(graph.edges) == 1):
-                raise ValueError("link block materialization currently supports homogeneous graphs only")
             message_passing_graph = _link_message_passing_graph(graph, records)
-            blocks = _build_homo_blocks_from_local_ids(
-                message_passing_graph,
-                context.state["link_node_ids_local"],
-                context.state["link_node_hops"],
-            )
-            link_blocks_cache[graph_id] = blocks
+            if needs_homo_link_blocks:
+                blocks = _build_homo_blocks_from_local_ids(
+                    message_passing_graph,
+                    context.state["link_node_ids_local"],
+                    context.state["link_node_hops"],
+                )
+            else:
+                blocks = _build_hetero_blocks_from_local_ids(
+                    message_passing_graph,
+                    context.state["link_node_hops_by_type"],
+                    edge_type=context.state["link_block_edge_type"],
+                )
+            link_blocks_cache[cache_key] = blocks
         return blocks
 
     def _replace_sample_payload(samples: list[SampleRecord]):
