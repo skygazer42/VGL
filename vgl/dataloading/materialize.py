@@ -249,11 +249,13 @@ def _link_message_passing_graph(graph: Graph, records: list[LinkPredictionRecord
 def _materialize_record_payload(context: MaterializationContext, payload):
     fetched_node_features = context.state.get("_materialized_node_features")
     fetched_edge_features = context.state.get("_materialized_edge_features")
+    needs_node_blocks = "node_hops" in context.state
     needs_link_blocks = "link_node_hops" in context.state and "link_node_ids_local" in context.state
-    if not fetched_node_features and not fetched_edge_features and not needs_link_blocks:
+    if not fetched_node_features and not fetched_edge_features and not needs_node_blocks and not needs_link_blocks:
         return payload
 
     graph_cache = {}
+    node_blocks_cache = {}
     link_blocks_cache = {}
 
     def _materialized_graph(graph):
@@ -267,6 +269,19 @@ def _materialize_record_payload(context: MaterializationContext, payload):
             )
             graph_cache[graph_id] = materialized
         return materialized
+
+    def _materialized_node_blocks(graph: Graph):
+        graph_id = id(graph)
+        blocks = node_blocks_cache.get(graph_id)
+        if blocks is None:
+            if not (set(graph.nodes) == {"node"} and len(graph.edges) == 1):
+                raise ValueError("node block materialization currently supports homogeneous graphs only")
+            node_ids = graph.nodes["node"].data.get("n_id")
+            if node_ids is None:
+                node_ids = torch.arange(graph.x.size(0), dtype=torch.long, device=graph.x.device)
+            blocks = _build_homo_blocks_from_local_ids(graph, node_ids, context.state["node_hops"])
+            node_blocks_cache[graph_id] = blocks
+        return blocks
 
     def _materialized_link_blocks(records: list[LinkPredictionRecord], graph: Graph):
         graph_id = id(graph)
@@ -283,6 +298,11 @@ def _materialize_record_payload(context: MaterializationContext, payload):
             link_blocks_cache[graph_id] = blocks
         return blocks
 
+    def _replace_sample_payload(samples: list[SampleRecord]):
+        graph = _materialized_graph(samples[0].graph)
+        blocks = _materialized_node_blocks(graph) if needs_node_blocks else None
+        return [replace(sample, graph=graph, blocks=blocks) for sample in samples]
+
     def _replace_link_payload(records: list[LinkPredictionRecord]):
         graph = _materialized_graph(records[0].graph)
         blocks = _materialized_link_blocks(records, graph) if needs_link_blocks else None
@@ -291,9 +311,13 @@ def _materialize_record_payload(context: MaterializationContext, payload):
     if isinstance(payload, list):
         if payload and all(isinstance(record, LinkPredictionRecord) for record in payload):
             return _replace_link_payload(payload)
+        if payload and all(isinstance(sample, SampleRecord) for sample in payload):
+            return _replace_sample_payload(payload)
         return [replace(record, graph=_materialized_graph(record.graph)) for record in payload]
     if isinstance(payload, LinkPredictionRecord):
         return _replace_link_payload([payload])[0]
+    if isinstance(payload, SampleRecord):
+        return _replace_sample_payload([payload])[0]
     return replace(payload, graph=_materialized_graph(payload.graph))
 
 

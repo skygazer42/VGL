@@ -473,6 +473,65 @@ def test_local_partition_sampled_training_stitched_sampling_crosses_partition_bo
 
 
 
+class TinyStitchedPartitionNodeBlockClassifier(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear = nn.Linear(1, 2)
+
+    def forward(self, batch):
+        assert batch.blocks is not None
+        assert len(batch.blocks) == 2
+        outer_block, inner_block = batch.blocks
+        assert torch.equal(batch.graph.n_id, torch.tensor([0, 1, 2, 3]))
+        assert torch.equal(outer_block.dst_n_id, torch.tensor([0, 1, 2]))
+        assert torch.equal(outer_block.src_n_id, torch.tensor([0, 1, 2, 3]))
+        assert torch.equal(outer_block.srcdata["x"].view(-1), torch.tensor([0.0, 1.0, 2.0, 3.0]))
+        assert torch.equal(inner_block.dst_n_id, torch.tensor([1]))
+        return self.linear(batch.graph.x)
+
+
+
+def test_local_partition_sampled_training_stitched_sampling_materializes_blocks(tmp_path):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]]),
+        x=torch.arange(4, dtype=torch.float32).view(4, 1),
+        y=torch.tensor([0, 1, 0, 1]),
+        train_mask=torch.tensor([True, True, True, True]),
+        val_mask=torch.tensor([True, True, True, True]),
+        test_mask=torch.tensor([True, True, True, True]),
+        edge_data={"edge_weight": torch.tensor([10.0, 20.0, 30.0, 40.0])},
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    coordinator = LocalSamplingCoordinator(shards)
+    loader = DataLoader(
+        dataset=ListDataset([(shards[0].graph, {"seed": 1, "sample_id": "stitched_blocks"})]),
+        sampler=NodeNeighborSampler(
+            num_neighbors=[-1, -1],
+            node_feature_names=("x",),
+            edge_feature_names=("edge_weight",),
+            output_blocks=True,
+        ),
+        batch_size=1,
+        feature_store=coordinator,
+    )
+    trainer = Trainer(
+        model=TinyStitchedPartitionNodeBlockClassifier(),
+        task=NodeClassificationTask(target="y", split=("train_mask", "val_mask", "test_mask")),
+        optimizer=torch.optim.Adam,
+        lr=1e-2,
+        max_epochs=1,
+    )
+
+    history = trainer.fit(loader)
+
+    assert history["completed_epochs"] == 1
+
+
+
 class TinyStitchedPartitionTemporalPredictor(nn.Module):
     def __init__(self):
         super().__init__()

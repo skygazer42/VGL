@@ -676,10 +676,14 @@ def _expand_stitched_homo_global_node_ids(
     fanouts,
     edge_type,
     generator=None,
-) -> torch.Tensor:
+    return_hops: bool = False,
+) -> torch.Tensor | tuple[torch.Tensor, list[torch.Tensor]]:
     seed_global_ids = torch.as_tensor(seed_global_ids, dtype=torch.long).view(-1)
     visited = {int(node) for node in seed_global_ids.tolist()}
     frontier = torch.tensor(sorted(visited), dtype=torch.long, device=seed_global_ids.device)
+    hop_nodes = None
+    if return_hops:
+        hop_nodes = [torch.tensor(sorted(visited), dtype=torch.long, device=seed_global_ids.device)]
     for fanout in fanouts:
         candidate_nodes = _stitched_frontier_candidates(source, frontier, visited, edge_type=edge_type)
         if fanout != -1 and len(candidate_nodes) > int(fanout):
@@ -687,20 +691,37 @@ def _expand_stitched_homo_global_node_ids(
             candidate_nodes = [candidate_nodes[index] for index in permutation]
         frontier = torch.tensor(candidate_nodes, dtype=torch.long, device=seed_global_ids.device)
         visited.update(int(node) for node in frontier.tolist())
-        if frontier.numel() == 0:
+        if hop_nodes is not None:
+            hop_nodes.append(torch.tensor(sorted(visited), dtype=torch.long, device=seed_global_ids.device))
+        elif frontier.numel() == 0:
             break
-    return torch.tensor(sorted(visited), dtype=torch.long, device=seed_global_ids.device)
+    expanded = torch.tensor(sorted(visited), dtype=torch.long, device=seed_global_ids.device)
+    if hop_nodes is not None:
+        return expanded, hop_nodes
+    return expanded
 
 
-def _expand_stitched_homo_node_ids(graph, source, seed_local_ids: torch.Tensor, *, fanouts) -> tuple[torch.Tensor, torch.Tensor]:
+def _expand_stitched_homo_node_ids(
+    graph,
+    source,
+    seed_local_ids: torch.Tensor,
+    *,
+    fanouts,
+    return_hops: bool = False,
+) -> tuple[torch.Tensor, torch.Tensor] | tuple[torch.Tensor, torch.Tensor, list[torch.Tensor]]:
     seed_local_ids = torch.as_tensor(seed_local_ids, dtype=torch.long).view(-1)
     seed_global_ids = _graph_node_global_ids(graph, seed_local_ids, node_type="node")
-    return seed_global_ids, _expand_stitched_homo_global_node_ids(
+    expanded = _expand_stitched_homo_global_node_ids(
         source,
         seed_global_ids,
         fanouts=fanouts,
         edge_type=graph._default_edge_type(),
+        return_hops=return_hops,
     )
+    if return_hops:
+        node_ids_global, node_hops = expanded
+        return seed_global_ids, node_ids_global, node_hops
+    return seed_global_ids, expanded
 
 
 def _collect_stitched_homo_edges(source, node_ids_global: torch.Tensor, *, edge_type) -> tuple[torch.Tensor, torch.Tensor]:
@@ -1578,17 +1599,23 @@ class PlanExecutor:
         output_blocks = bool(stage.params.get("output_blocks", False))
 
         if _match_partition_shard(context.graph, context.feature_store) is not None:
-            if output_blocks:
-                raise ValueError(
-                    "NodeNeighborSampler output_blocks is not yet supported for stitched homogeneous node sampling"
-                )
             seed_local_ids = torch.as_tensor(request.node_ids, dtype=torch.long).view(-1)
-            seed_global_ids, node_ids_global = _expand_stitched_homo_node_ids(
-                context.graph,
-                context.feature_store,
-                seed_local_ids,
-                fanouts=stage.params["num_neighbors"],
-            )
+            if output_blocks:
+                seed_global_ids, node_ids_global, node_hops = _expand_stitched_homo_node_ids(
+                    context.graph,
+                    context.feature_store,
+                    seed_local_ids,
+                    fanouts=stage.params["num_neighbors"],
+                    return_hops=True,
+                )
+                context.state["node_hops"] = node_hops
+            else:
+                seed_global_ids, node_ids_global = _expand_stitched_homo_node_ids(
+                    context.graph,
+                    context.feature_store,
+                    seed_local_ids,
+                    fanouts=stage.params["num_neighbors"],
+                )
             edge_ids_global, edge_index_global = _collect_stitched_homo_edges(
                 context.feature_store,
                 node_ids_global,

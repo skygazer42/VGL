@@ -512,6 +512,80 @@ def test_node_neighbor_sampler_stitched_sampling_crosses_partition_boundaries_th
     assert batch.metadata == [{"seed": 1, "sample_id": "stitched"}]
 
 
+def test_node_neighbor_sampler_stitched_sampling_materializes_blocks_through_coordinator(tmp_path):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]]),
+        x=torch.arange(4, dtype=torch.float32).view(4, 1),
+        y=torch.tensor([0, 1, 0, 1]),
+        edge_data={"edge_weight": torch.tensor([10.0, 20.0, 30.0, 40.0])},
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    coordinator = LocalSamplingCoordinator(shards)
+    loader = Loader(
+        dataset=ListDataset([(shards[0].graph, {"seed": 1, "sample_id": "stitched_blocks"})]),
+        sampler=NodeNeighborSampler(
+            num_neighbors=[-1, -1],
+            node_feature_names=("x",),
+            edge_feature_names=("edge_weight",),
+            output_blocks=True,
+        ),
+        batch_size=1,
+        feature_store=coordinator,
+    )
+
+    batch = next(iter(loader))
+
+    assert isinstance(batch, NodeBatch)
+    assert batch.blocks is not None
+    assert len(batch.blocks) == 2
+    outer_block, inner_block = batch.blocks
+    assert torch.equal(batch.graph.n_id, torch.tensor([0, 1, 2, 3]))
+    assert torch.equal(outer_block.dst_n_id, torch.tensor([0, 1, 2]))
+    assert torch.equal(outer_block.src_n_id, torch.tensor([0, 1, 2, 3]))
+    assert torch.equal(outer_block.edata["e_id"], torch.tensor([0, 1, 3]))
+    assert torch.equal(outer_block.srcdata["x"].view(-1), torch.tensor([0.0, 1.0, 2.0, 3.0]))
+    assert torch.equal(outer_block.edata["edge_weight"], torch.tensor([10.0, 20.0, 40.0]))
+    assert torch.equal(inner_block.dst_n_id, torch.tensor([1]))
+    assert torch.equal(inner_block.src_n_id, torch.tensor([1, 0]))
+    assert torch.equal(inner_block.edata["e_id"], torch.tensor([0]))
+    assert torch.equal(inner_block.edata["edge_weight"], torch.tensor([10.0]))
+
+
+
+def test_node_neighbor_sampler_stitched_output_blocks_keep_fixed_hop_count_when_frontier_exhausts(tmp_path):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0], [1]], dtype=torch.long),
+        x=torch.arange(2, dtype=torch.float32).view(2, 1),
+        y=torch.tensor([0, 1]),
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    coordinator = LocalSamplingCoordinator(shards)
+    loader = Loader(
+        dataset=ListDataset([(shards[1].graph, {"seed": 0, "sample_id": "stitched_short"})]),
+        sampler=NodeNeighborSampler(num_neighbors=[-1, -1], output_blocks=True),
+        batch_size=1,
+        feature_store=coordinator,
+    )
+
+    batch = next(iter(loader))
+
+    assert isinstance(batch, NodeBatch)
+    assert batch.blocks is not None
+    assert len(batch.blocks) == 2
+    assert torch.equal(batch.graph.n_id, torch.tensor([0, 1]))
+    assert torch.equal(batch.blocks[0].dst_n_id, torch.tensor([0, 1]))
+    assert torch.equal(batch.blocks[1].dst_n_id, torch.tensor([1]))
+
+
+
 def test_node_neighbor_sampler_output_blocks_preserve_order_and_global_ids():
     graph = Graph.homo(
         edge_index=torch.tensor([[0, 1, 3], [1, 2, 2]], dtype=torch.long),
