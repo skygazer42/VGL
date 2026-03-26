@@ -8,8 +8,12 @@ from vgl.ops.path import metapath_reachable_graph as metapath_reachable_graph
 from vgl.ops.path import random_walk as random_walk
 from vgl.ops.pipeline import GraphTransform as GraphTransform
 from vgl.ops.pipeline import TransformPipeline as TransformPipeline
+from vgl.ops.query import edge_ids as edge_ids
+from vgl.ops.query import find_edges as find_edges
+from vgl.ops.query import has_edges_between as has_edges_between
 from vgl.ops.structure import add_self_loops as add_self_loops
 from vgl.ops.structure import remove_self_loops as remove_self_loops
+from vgl.ops.structure import reverse as reverse
 from vgl.ops.structure import to_bidirected as to_bidirected
 from vgl.ops.subgraph import edge_subgraph as edge_subgraph
 from vgl.ops.subgraph import in_subgraph as in_subgraph
@@ -22,10 +26,14 @@ __all__ = [
     "add_self_loops",
     "remove_self_loops",
     "to_bidirected",
+    "reverse",
     "line_graph",
     "metapath_reachable_graph",
     "random_walk",
     "metapath_random_walk",
+    "find_edges",
+    "edge_ids",
+    "has_edges_between",
     "node_subgraph",
     "edge_subgraph",
     "in_subgraph",

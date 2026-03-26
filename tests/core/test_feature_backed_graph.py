@@ -247,3 +247,28 @@ def test_featureless_storage_backed_frontier_subgraphs_preserve_node_count():
     assert torch.equal(outbound.edge_index, torch.tensor([[0], [1]]))
     assert torch.equal(inbound.edata["e_id"], torch.tensor([1]))
     assert torch.equal(outbound.edata["e_id"], torch.tensor([0]))
+
+
+def test_featureless_storage_backed_reverse_preserves_node_count():
+    schema = GraphSchema(
+        node_types=("node",),
+        edge_types=(HOMO_EDGE,),
+        node_features={"node": ()},
+        edge_features={HOMO_EDGE: ("edge_index",)},
+    )
+    graph_store = InMemoryGraphStore(
+        {HOMO_EDGE: torch.tensor([[0, 1], [1, 0]])},
+        num_nodes={"node": 4},
+    )
+    graph = Graph.from_storage(
+        schema=schema,
+        feature_store=FeatureStore({}),
+        graph_store=graph_store,
+    )
+
+    reversed_graph = graph.reverse()
+
+    assert reversed_graph.graph_store is graph_store
+    assert reversed_graph.adjacency().shape == (4, 4)
+    assert torch.equal(reversed_graph.edge_index, torch.tensor([[1, 0], [0, 1]]))
+    assert torch.equal(reversed_graph.edata["e_id"], torch.tensor([0, 1]))

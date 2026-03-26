@@ -223,6 +223,26 @@ class Graph:
 
         return out_subgraph(self, nodes)
 
+    def find_edges(self, eids, *, edge_type=None):
+        from vgl.ops import find_edges
+
+        return find_edges(self, eids, edge_type=edge_type)
+
+    def edge_ids(self, u, v, *, return_uv: bool = False, edge_type=None):
+        from vgl.ops import edge_ids
+
+        return edge_ids(self, u, v, return_uv=return_uv, edge_type=edge_type)
+
+    def has_edges_between(self, u, v, *, edge_type=None):
+        from vgl.ops import has_edges_between
+
+        return has_edges_between(self, u, v, edge_type=edge_type)
+
+    def reverse(self, *, copy_ndata: bool = True, copy_edata: bool = False):
+        from vgl.ops import reverse
+
+        return reverse(self, copy_ndata=copy_ndata, copy_edata=copy_edata)
+
     def khop_nodes(self, seeds, *, num_hops: int, direction: str = "out", edge_type=None):
         from vgl.ops import khop_nodes
 

@@ -1,7 +1,8 @@
 import torch
 
 from vgl.graph.graph import Graph
-from vgl.graph.stores import EdgeStore
+from vgl.graph.schema import GraphSchema
+from vgl.graph.stores import EdgeStore, NodeStore
 
 
 def _resolve_edge_type(graph: Graph, edge_type=None) -> tuple[str, str, str]:
@@ -27,6 +28,24 @@ def _edge_store_with_index(store: EdgeStore, edge_index: torch.Tensor) -> EdgeSt
         else:
             data[key] = value
     return EdgeStore(store.type_name, data)
+
+
+def _public_edge_ids(store: EdgeStore) -> torch.Tensor:
+    public_ids = store.data.get("e_id")
+    if public_ids is None:
+        return torch.arange(store.edge_index.size(1), dtype=torch.long, device=store.edge_index.device)
+    return torch.as_tensor(public_ids, dtype=torch.long, device=store.edge_index.device).view(-1)
+
+
+def _preserved_time_attr(graph: Graph, node_features: dict[str, tuple[str, ...]], edge_features: dict[tuple[str, str, str], tuple[str, ...]]) -> str | None:
+    time_attr = graph.schema.time_attr
+    if time_attr is None:
+        return None
+    if any(time_attr in features for features in node_features.values()):
+        return time_attr
+    if any(time_attr in features for features in edge_features.values()):
+        return time_attr
+    return None
 
 
 def add_self_loops(graph: Graph, *, edge_type=None) -> Graph:
@@ -78,3 +97,47 @@ def to_bidirected(graph: Graph, *, edge_type=None) -> Graph:
     edges = dict(graph.edges)
     edges[edge_type] = _edge_store_with_index(store, updated_index)
     return Graph(schema=graph.schema, nodes=graph.nodes, edges=edges)
+
+
+def reverse(graph: Graph, *, copy_ndata: bool = True, copy_edata: bool = False) -> Graph:
+    node_stores = {
+        node_type: NodeStore(node_type, graph.nodes[node_type].data if copy_ndata else {})
+        for node_type in graph.schema.node_types
+    }
+    node_features = {node_type: tuple(node_stores[node_type].data.keys()) for node_type in graph.schema.node_types}
+
+    edge_stores: dict[tuple[str, str, str], EdgeStore] = {}
+    edge_features: dict[tuple[str, str, str], tuple[str, ...]] = {}
+    for edge_type in graph.schema.edge_types:
+        store = graph.edges[edge_type]
+        reversed_edge_type = (edge_type[2], edge_type[1], edge_type[0])
+        edge_data = {
+            "edge_index": store.edge_index[[1, 0]].contiguous(),
+            "e_id": _public_edge_ids(store),
+        }
+        if copy_edata:
+            edge_count = int(store.edge_index.size(1))
+            for key, value in store.data.items():
+                if key in {"edge_index", "e_id"}:
+                    continue
+                if isinstance(value, torch.Tensor) and value.ndim > 0 and value.size(0) == edge_count:
+                    edge_data[key] = value
+                else:
+                    edge_data[key] = value
+        edge_stores[reversed_edge_type] = EdgeStore(reversed_edge_type, edge_data)
+        edge_features[reversed_edge_type] = tuple(edge_data.keys())
+
+    schema = GraphSchema(
+        node_types=graph.schema.node_types,
+        edge_types=tuple(edge_stores),
+        node_features=node_features,
+        edge_features=edge_features,
+        time_attr=_preserved_time_attr(graph, node_features, edge_features),
+    )
+    return Graph(
+        schema=schema,
+        nodes=node_stores,
+        edges=edge_stores,
+        feature_store=graph.feature_store,
+        graph_store=graph.graph_store,
+    )

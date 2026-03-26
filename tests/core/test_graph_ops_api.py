@@ -105,3 +105,22 @@ def test_graph_frontier_subgraph_bridges_call_ops_layer():
     assert torch.equal(inbound.edata["e_id"], torch.tensor([1, 2, 3]))
     assert torch.equal(outbound.edge_index, torch.tensor([[0, 3], [2, 0]]))
     assert torch.equal(outbound.edata["e_id"], torch.tensor([0, 2]))
+
+
+def test_graph_query_and_reverse_bridges_call_ops_layer():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 0, 1, 2], [1, 1, 2, 0]]),
+        x=torch.tensor([[1.0], [2.0], [3.0]]),
+    )
+
+    src, dst = graph.find_edges(torch.tensor([3, 0]))
+    eids = graph.edge_ids(torch.tensor([0, 1]), torch.tensor([1, 2]))
+    connected = graph.has_edges_between(torch.tensor([0, 2]), torch.tensor([1, 1]))
+    reversed_graph = graph.reverse(copy_edata=False)
+
+    assert torch.equal(src, torch.tensor([2, 0]))
+    assert torch.equal(dst, torch.tensor([0, 1]))
+    assert torch.equal(eids, torch.tensor([0, 2]))
+    assert torch.equal(connected, torch.tensor([True, False]))
+    assert torch.equal(reversed_graph.edge_index, torch.tensor([[1, 1, 2, 0], [0, 0, 1, 2]]))
+    assert torch.equal(reversed_graph.edata["e_id"], torch.tensor([0, 1, 2, 3]))
