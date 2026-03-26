@@ -387,3 +387,30 @@ def test_featureless_storage_backed_incidence_preserves_declared_node_space():
             ]
         ),
     )
+
+
+def test_featureless_storage_backed_adj_tensors_preserve_declared_node_space():
+    schema = GraphSchema(
+        node_types=("node",),
+        edge_types=(HOMO_EDGE,),
+        node_features={"node": ()},
+        edge_features={HOMO_EDGE: ("edge_index",)},
+    )
+    graph = Graph.from_storage(
+        schema=schema,
+        feature_store=FeatureStore({}),
+        graph_store=InMemoryGraphStore(
+            {HOMO_EDGE: torch.tensor([[0, 1], [1, 0]])},
+            num_nodes={"node": 4},
+        ),
+    )
+
+    crow_indices, col_indices, csr_eids = graph.adj_tensors("csr")
+    ccol_indices, row_indices, csc_eids = graph.adj_tensors("csc")
+
+    assert torch.equal(crow_indices, torch.tensor([0, 1, 2, 2, 2]))
+    assert torch.equal(col_indices, torch.tensor([1, 0]))
+    assert torch.equal(csr_eids, torch.tensor([0, 1]))
+    assert torch.equal(ccol_indices, torch.tensor([0, 1, 2, 2, 2]))
+    assert torch.equal(row_indices, torch.tensor([1, 0]))
+    assert torch.equal(csc_eids, torch.tensor([1, 0]))

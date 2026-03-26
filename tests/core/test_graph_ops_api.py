@@ -206,3 +206,16 @@ def test_graph_inc_bridge_calls_ops_layer():
             ]
         ),
     )
+
+
+def test_graph_adj_tensors_bridge_calls_ops_layer():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[2, 0, 1], [1, 1, 0]]),
+        x=torch.tensor([[1.0], [2.0], [3.0], [4.0]]),
+    )
+
+    crow_indices, col_indices, eids = graph.adj_tensors("csr")
+
+    assert torch.equal(crow_indices, torch.tensor([0, 1, 2, 3, 3]))
+    assert torch.equal(col_indices, torch.tensor([1, 0, 1]))
+    assert torch.equal(eids, torch.tensor([1, 2, 0]))

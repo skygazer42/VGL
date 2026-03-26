@@ -2,7 +2,7 @@ import pytest
 import torch
 
 from vgl import Graph
-from vgl.ops import all_edges, edge_ids, find_edges, has_edges_between, in_degrees, in_edges, in_subgraph, num_edges, num_nodes, number_of_edges, number_of_nodes, out_degrees, out_edges, predecessors, reverse, successors
+from vgl.ops import adj_tensors, all_edges, edge_ids, find_edges, has_edges_between, in_degrees, in_edges, in_subgraph, num_edges, num_nodes, number_of_edges, number_of_nodes, out_degrees, out_edges, out_subgraph, predecessors, reverse, successors
 from vgl.sparse import SparseLayout, to_coo
 
 
@@ -452,3 +452,83 @@ def test_incidence_sparse_view_rejects_both_for_bipartite_relation_and_invalid_t
 
     with pytest.raises(ValueError):
         graph.inc("bad")
+
+
+def test_adj_tensors_support_coo_csr_and_csc_layouts():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[2, 0, 1], [1, 1, 0]]),
+        x=torch.tensor([[1.0], [2.0], [3.0], [4.0]]),
+    )
+
+    src, dst = adj_tensors(graph, "coo")
+    crow_indices, col_indices, csr_eids = adj_tensors(graph, "csr")
+    ccol_indices, row_indices, csc_eids = adj_tensors(graph, "csc")
+
+    assert torch.equal(src, torch.tensor([2, 0, 1]))
+    assert torch.equal(dst, torch.tensor([1, 1, 0]))
+    assert torch.equal(crow_indices, torch.tensor([0, 1, 2, 3, 3]))
+    assert torch.equal(col_indices, torch.tensor([1, 0, 1]))
+    assert torch.equal(csr_eids, torch.tensor([1, 2, 0]))
+    assert torch.equal(ccol_indices, torch.tensor([0, 1, 3, 3, 3]))
+    assert torch.equal(row_indices, torch.tensor([1, 2, 0]))
+    assert torch.equal(csc_eids, torch.tensor([2, 0, 1]))
+
+
+def test_adj_tensors_use_public_edge_ids_for_derived_graph_views():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 2, 1, 0], [2, 3, 0, 1]]),
+        x=torch.tensor([[1.0], [2.0], [3.0], [4.0]]),
+        edge_data={"e_id": torch.tensor([5, 1, 7, 3])},
+    )
+
+    frontier = out_subgraph(graph, torch.tensor([0, 2]))
+    src, dst = adj_tensors(frontier, "coo")
+    crow_indices, col_indices, eids = adj_tensors(frontier, "csr")
+
+    assert torch.equal(src, torch.tensor([2, 0, 0]))
+    assert torch.equal(dst, torch.tensor([3, 1, 2]))
+    assert torch.equal(crow_indices, torch.tensor([0, 2, 2, 3, 3]))
+    assert torch.equal(col_indices, torch.tensor([1, 2, 3]))
+    assert torch.equal(eids, torch.tensor([3, 5, 1]))
+
+
+def test_adj_tensors_preserve_public_edge_order_within_compressed_buckets():
+    csr_graph = Graph.homo(
+        edge_index=torch.tensor([[0, 0, 0], [2, 1, 0]]),
+        x=torch.tensor([[1.0], [2.0], [3.0]]),
+    )
+    csc_graph = Graph.homo(
+        edge_index=torch.tensor([[2, 1, 0], [0, 0, 0]]),
+        x=torch.tensor([[1.0], [2.0], [3.0]]),
+    )
+
+    crow_indices, col_indices, csr_eids = adj_tensors(csr_graph, "csr")
+    ccol_indices, row_indices, csc_eids = adj_tensors(csc_graph, "csc")
+
+    assert torch.equal(crow_indices, torch.tensor([0, 3, 3, 3]))
+    assert torch.equal(col_indices, torch.tensor([2, 1, 0]))
+    assert torch.equal(csr_eids, torch.tensor([0, 1, 2]))
+    assert torch.equal(ccol_indices, torch.tensor([0, 3, 3, 3]))
+    assert torch.equal(row_indices, torch.tensor([2, 1, 0]))
+    assert torch.equal(csc_eids, torch.tensor([0, 1, 2]))
+
+
+def test_adj_tensors_support_selected_heterogeneous_relation_and_validate_layout():
+    writes = ("author", "writes", "paper")
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.tensor([[1.0], [2.0]])},
+            "paper": {"x": torch.tensor([[10.0], [20.0], [30.0]])},
+        },
+        edges={
+            writes: {"edge_index": torch.tensor([[1, 0], [2, 1]])},
+        },
+    )
+
+    src, dst = adj_tensors(graph, edge_type=writes)
+
+    assert torch.equal(src, torch.tensor([1, 0]))
+    assert torch.equal(dst, torch.tensor([2, 1]))
+
+    with pytest.raises(ValueError):
+        adj_tensors(graph, "bad", edge_type=writes)

@@ -130,6 +130,31 @@ def _normalize_sparse_layout(layout):
     return layout
 
 
+def _ordered_edge_tensors(store) -> tuple[torch.Tensor, torch.Tensor]:
+    positions = _ordered_edge_positions(store, order="eid")
+    if positions.numel() == 0:
+        empty = store.edge_index[:, :0]
+        return empty, _public_edge_ids(store)[:0]
+    return store.edge_index[:, positions], _public_edge_ids(store)[positions]
+
+
+def _compress_edge_tensors(
+    major: torch.Tensor,
+    minor: torch.Tensor,
+    public_ids: torch.Tensor,
+    *,
+    major_size: int,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    order = torch.argsort(major, stable=True)
+    major = major[order]
+    minor = minor[order]
+    public_ids = public_ids[order]
+    counts = torch.bincount(major, minlength=major_size)
+    pointers = torch.zeros(major_size + 1, dtype=torch.long, device=major.device)
+    pointers[1:] = torch.cumsum(counts, dim=0)
+    return pointers, minor, public_ids
+
+
 def _degrees_for_endpoint(graph: Graph, edge_type, nodes, *, endpoint: int):
     store = graph.edges[edge_type]
     node_ids, scalar_input = _normalize_optional_node_ids(nodes)
@@ -242,6 +267,37 @@ def all_edges(graph: Graph, *, form: str = "uv", order: str | None = "eid", edge
     return _format_edge_selection(store, positions, form=form)
 
 
+def adj_tensors(graph: Graph, layout="coo", *, edge_type=None):
+    from vgl.sparse import SparseLayout
+
+    edge_type = _resolve_edge_type(graph, edge_type)
+    layout = _normalize_sparse_layout(layout)
+    store = graph.edges[edge_type]
+    ordered, public_ids = _ordered_edge_tensors(store)
+    src_type, _, dst_type = edge_type
+
+    if layout is SparseLayout.COO:
+        return ordered[0], ordered[1]
+
+    if layout is SparseLayout.CSR:
+        return _compress_edge_tensors(
+            ordered[0],
+            ordered[1],
+            public_ids,
+            major_size=graph._node_count(src_type),
+        )
+
+    if layout is SparseLayout.CSC:
+        return _compress_edge_tensors(
+            ordered[1],
+            ordered[0],
+            public_ids,
+            major_size=graph._node_count(dst_type),
+        )
+
+    raise ValueError(f"Unsupported sparse layout: {layout}")
+
+
 def inc(graph: Graph, typestr: str = "both", *, layout="coo", edge_type=None):
     from vgl.sparse import from_edge_index
 
@@ -252,9 +308,8 @@ def inc(graph: Graph, typestr: str = "both", *, layout="coo", edge_type=None):
 
     store = graph.edges[edge_type]
     src_type, _, dst_type = edge_type
-    positions = _ordered_edge_positions(store, order="eid")
-    ordered = store.edge_index[:, positions] if positions.numel() > 0 else store.edge_index[:, :0]
-    edge_columns = torch.arange(positions.numel(), dtype=torch.long, device=store.edge_index.device)
+    ordered, _ = _ordered_edge_tensors(store)
+    edge_columns = torch.arange(ordered.size(1), dtype=torch.long, device=store.edge_index.device)
 
     if typestr == "in":
         values = torch.ones(edge_columns.numel(), dtype=torch.float32, device=store.edge_index.device)

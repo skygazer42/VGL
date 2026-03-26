@@ -238,6 +238,11 @@ class Graph:
 
         return all_edges(self, form=form, order=order, edge_type=edge_type)
 
+    def adj_tensors(self, layout="coo", *, edge_type=None):
+        from vgl.ops import adj_tensors
+
+        return adj_tensors(self, layout=layout, edge_type=edge_type)
+
     def inc(self, typestr: str = "both", *, layout="coo", edge_type=None):
         from vgl.ops import inc
 
