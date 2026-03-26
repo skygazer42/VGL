@@ -399,3 +399,122 @@ def test_link_neighbor_sampler_stitched_hetero_link_sampling_crosses_partition_b
     assert torch.equal(batch.src_index, torch.tensor([0]))
     assert torch.equal(batch.dst_index, torch.tensor([0]))
     assert torch.equal(batch.labels, torch.tensor([1.0]))
+
+
+def test_link_neighbor_sampler_output_blocks_preserve_order_and_global_ids():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 3, 2], [1, 2, 2, 3]], dtype=torch.long),
+        x=torch.arange(16, dtype=torch.float32).view(4, 4),
+        n_id=torch.tensor([10, 11, 12, 13], dtype=torch.long),
+        edge_data={"e_id": torch.tensor([100, 101, 102, 103], dtype=torch.long)},
+    )
+    sampler = LinkNeighborSampler(num_neighbors=[-1, -1], output_blocks=True)
+
+    record = sampler.sample(LinkPredictionRecord(graph=graph, src_index=1, dst_index=2, label=1))
+
+    assert record.blocks is not None
+    assert len(record.blocks) == 2
+    outer_block, inner_block = record.blocks
+    assert torch.equal(outer_block.dst_n_id, torch.tensor([10, 11, 12, 13], dtype=torch.long))
+    assert torch.equal(outer_block.src_n_id, torch.tensor([10, 11, 12, 13], dtype=torch.long))
+    assert torch.equal(outer_block.edata["e_id"], torch.tensor([100, 101, 102, 103], dtype=torch.long))
+    assert torch.equal(inner_block.dst_n_id, torch.tensor([11, 12], dtype=torch.long))
+    assert torch.equal(inner_block.src_n_id, torch.tensor([11, 12, 10, 13], dtype=torch.long))
+    assert torch.equal(inner_block.edata["e_id"], torch.tensor([100, 101, 102], dtype=torch.long))
+
+
+
+def test_link_neighbor_sampler_output_blocks_use_only_sampled_edges():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 2, 3, 4, 1], [1, 1, 1, 1, 5]], dtype=torch.long),
+        x=torch.randn(6, 2),
+        edge_data={"e_id": torch.tensor([10, 11, 12, 13, 14], dtype=torch.long)},
+    )
+    sampler = LinkNeighborSampler(num_neighbors=[2], seed=0, output_blocks=True)
+
+    record = sampler.sample(LinkPredictionRecord(graph=graph, src_index=1, dst_index=5, label=1))
+
+    assert record.blocks is not None
+    assert len(record.blocks) == 1
+    sampled_node_ids = set(record.graph.n_id.tolist())
+    omitted_edge_ids = [
+        edge_id
+        for edge_id, (src_index, dst_index) in zip(graph.edata["e_id"].tolist(), graph.edge_index.t().tolist())
+        if int(dst_index) in {1, 5} and int(src_index) not in sampled_node_ids
+    ]
+    assert omitted_edge_ids
+    assert set(record.blocks[0].edata["e_id"].tolist()).isdisjoint(omitted_edge_ids)
+
+
+
+def test_link_neighbor_sampler_output_blocks_exclude_seed_edges_from_message_passing_blocks():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1], [1, 2]], dtype=torch.long),
+        x=torch.randn(3, 2),
+        edge_data={"e_id": torch.tensor([100, 101], dtype=torch.long)},
+    )
+    sampler = LinkNeighborSampler(num_neighbors=[-1], output_blocks=True)
+
+    record = sampler.sample(
+        LinkPredictionRecord(
+            graph=graph,
+            src_index=1,
+            dst_index=2,
+            label=1,
+            metadata={"exclude_seed_edges": True},
+        )
+    )
+
+    assert record.blocks is not None
+    assert torch.equal(record.graph.edata["e_id"], torch.tensor([100, 101], dtype=torch.long))
+    assert torch.equal(record.blocks[0].edata["e_id"], torch.tensor([100], dtype=torch.long))
+
+
+
+def test_loader_materializes_link_prediction_batch_blocks_for_homogeneous_sampling():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 3, 2], [1, 2, 2, 3]], dtype=torch.long),
+        x=torch.arange(16, dtype=torch.float32).view(4, 4),
+        n_id=torch.tensor([10, 11, 12, 13], dtype=torch.long),
+        edge_data={"e_id": torch.tensor([100, 101, 102, 103], dtype=torch.long)},
+    )
+    loader = Loader(
+        dataset=ListDataset([LinkPredictionRecord(graph=graph, src_index=1, dst_index=2, label=1)]),
+        sampler=LinkNeighborSampler(num_neighbors=[-1, -1], output_blocks=True),
+        batch_size=1,
+    )
+
+    batch = next(iter(loader))
+
+    assert batch.blocks is not None
+    assert len(batch.blocks) == 2
+    assert torch.equal(batch.blocks[0].dst_n_id, torch.tensor([10, 11, 12, 13], dtype=torch.long))
+    assert torch.equal(batch.blocks[1].dst_n_id, torch.tensor([11, 12], dtype=torch.long))
+
+
+
+def test_link_neighbor_sampler_rejects_block_output_for_heterogeneous_graphs():
+    import pytest
+
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.randn(2, 4)},
+            "paper": {"x": torch.randn(3, 4)},
+        },
+        edges={
+            WRITES: {"edge_index": torch.tensor([[0, 1], [1, 2]], dtype=torch.long)},
+            WRITTEN_BY: {"edge_index": torch.tensor([[1, 2], [0, 1]], dtype=torch.long)},
+        },
+    )
+    sampler = LinkNeighborSampler(num_neighbors=[-1], output_blocks=True)
+
+    with pytest.raises(ValueError, match="homogeneous"):
+        sampler.sample(
+            LinkPredictionRecord(
+                graph=graph,
+                src_index=0,
+                dst_index=1,
+                label=1,
+                edge_type=WRITES,
+            )
+        )

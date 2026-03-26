@@ -1699,11 +1699,16 @@ class PlanExecutor:
         sampler = stage.params["sampler"]
         records = list(stage.params["records"])
         graph = records[0].graph
+        output_blocks = bool(stage.params.get("output_blocks", False))
         stitched_homo_partition = _match_partition_shard(graph, context.feature_store)
         stitched_hetero_partition = None
         if stitched_homo_partition is None:
             stitched_hetero_partition = _match_hetero_partition_shard(graph, context.feature_store)
         if stitched_homo_partition is not None:
+            if output_blocks:
+                raise ValueError(
+                    "LinkNeighborSampler output_blocks is not yet supported for stitched homogeneous link sampling"
+                )
             seed_local_ids = torch.tensor(
                 [int(node) for record in records for node in (record.src_index, record.dst_index)],
                 dtype=torch.long,
@@ -1731,6 +1736,8 @@ class PlanExecutor:
             sampled_records = _build_stitched_homo_link_records(graph, records, stitched_graph)
             sampled = sampled_records if bool(stage.params["is_sequence"]) else sampled_records[0]
         elif stitched_hetero_partition is not None:
+            if output_blocks:
+                raise ValueError("LinkNeighborSampler output_blocks currently supports homogeneous link sampling only")
             seed_global_ids_by_type = _stitched_hetero_link_seed_global_ids(graph, records)
             node_ids_by_type = _expand_stitched_hetero_global_node_ids(
                 context.feature_store,
@@ -1754,7 +1761,16 @@ class PlanExecutor:
             sampled_records = _build_stitched_hetero_link_records(graph, records, stitched_graph)
             sampled = sampled_records if bool(stage.params["is_sequence"]) else sampled_records[0]
         else:
-            sampled = sampler._sample_from_seed_records(records, is_sequence=bool(stage.params["is_sequence"]))
+            if output_blocks:
+                sampled, link_node_ids_local, link_node_hops = sampler._sample_from_seed_records(
+                    records,
+                    is_sequence=bool(stage.params["is_sequence"]),
+                    return_hops=True,
+                )
+                context.state["link_node_ids_local"] = link_node_ids_local
+                context.state["link_node_hops"] = link_node_hops
+            else:
+                sampled = sampler._sample_from_seed_records(records, is_sequence=bool(stage.params["is_sequence"]))
         if isinstance(sampled, (list, tuple)):
             sampled_records = list(sampled)
             context.state["records"] = sampled_records

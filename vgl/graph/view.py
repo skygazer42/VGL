@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 
+import torch
+
 from vgl.graph.schema import GraphSchema
 from vgl.graph.stores import EdgeStore, NodeStore
 
@@ -18,6 +20,13 @@ class GraphView:
         if len(self.edges) == 1:
             return next(iter(self.edges))
         raise AttributeError("edge_index")
+
+    def _node_count(self, node_type: str) -> int:
+        store = self.nodes[node_type]
+        for value in store.data.values():
+            if isinstance(value, torch.Tensor) and value.ndim > 0:
+                return int(value.size(0))
+        raise ValueError(f"Cannot infer node count for node type {node_type!r}")
 
     def __getattr__(self, name: str):
         try:

@@ -27,6 +27,7 @@ class LinkPredictionRecord:
     reverse_edge_type: Any | None = None
     query_id: Any | None = None
     filter_ranking: bool = False
+    blocks: list[Any] | None = None
 
 
 @dataclass(slots=True)

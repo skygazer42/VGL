@@ -463,3 +463,58 @@ def test_node_batch_pin_memory_pins_blocks():
     assert pinned.blocks[0].dst_n_id.is_pinned()
     assert pinned.blocks[0].graph.nodes[pinned.blocks[0].src_store_type].data["n_id"].is_pinned()
     assert not batch.blocks[0].src_n_id.is_pinned()
+
+
+def test_link_prediction_batch_to_moves_blocks():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2], [1, 2, 3]], dtype=torch.long),
+        x=torch.randn(4, 4),
+        n_id=torch.tensor([10, 11, 12, 13], dtype=torch.long),
+        edge_data={"e_id": torch.tensor([100, 101, 102], dtype=torch.long)},
+    )
+    block = graph.to_block(torch.tensor([2, 3], dtype=torch.long))
+    batch = LinkPredictionBatch(
+        graph=graph,
+        src_index=torch.tensor([1], dtype=torch.long),
+        dst_index=torch.tensor([2], dtype=torch.long),
+        labels=torch.tensor([1.0], dtype=torch.float32),
+        blocks=[block],
+        metadata=[{"label": 1}],
+    )
+
+    moved = batch.to(device=_transfer_device(), dtype=torch.float64)
+
+    assert moved is not batch
+    assert moved.blocks is not None
+    assert moved.blocks[0] is not block
+    assert moved.blocks[0].src_n_id.device.type == "meta"
+    assert moved.blocks[0].dst_n_id.device.type == "meta"
+    assert moved.blocks[0].graph.nodes[moved.blocks[0].src_store_type].data["n_id"].device.type == "meta"
+    assert batch.blocks[0].src_n_id.device.type == "cpu"
+
+
+
+def test_link_prediction_batch_pin_memory_pins_blocks():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2], [1, 2, 3]], dtype=torch.long),
+        x=torch.randn(4, 4),
+        n_id=torch.tensor([10, 11, 12, 13], dtype=torch.long),
+        edge_data={"e_id": torch.tensor([100, 101, 102], dtype=torch.long)},
+    )
+    batch = LinkPredictionBatch(
+        graph=graph,
+        src_index=torch.tensor([1], dtype=torch.long),
+        dst_index=torch.tensor([2], dtype=torch.long),
+        labels=torch.tensor([1.0], dtype=torch.float32),
+        blocks=[graph.to_block(torch.tensor([2, 3], dtype=torch.long))],
+        metadata=[{"label": 1}],
+    )
+
+    pinned = batch.pin_memory()
+
+    assert pinned is not batch
+    assert pinned.blocks is not None
+    assert pinned.blocks[0].src_n_id.is_pinned()
+    assert pinned.blocks[0].dst_n_id.is_pinned()
+    assert pinned.blocks[0].graph.nodes[pinned.blocks[0].src_store_type].data["n_id"].is_pinned()
+    assert not batch.blocks[0].src_n_id.is_pinned()

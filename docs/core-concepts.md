@@ -22,7 +22,7 @@ Homogeneous graphs can carry edge-level tensors through `Graph.homo(edge_data={.
 
 ## Block
 
-`Block` is the compact relation-local message-flow container returned by `to_block(...)` or `Graph.to_block(...)`. It wraps one bipartite `graph` plus explicit source/destination node id metadata through `src_n_id`, `dst_n_id`, and edge metadata through `edata["e_id"]`. This gives VGL a first-class bridge to DGL-style block workflows without forcing every sampler to change contracts. Local homogeneous `NodeNeighborSampler(..., output_blocks=True)` now materializes `NodeBatch.blocks` through the same container while keeping the existing sampled `graph` and `seed_index` contract.
+`Block` is the compact relation-local message-flow container returned by `to_block(...)` or `Graph.to_block(...)`. It wraps one bipartite `graph` plus explicit source/destination node id metadata through `src_n_id`, `dst_n_id`, and edge metadata through `edata["e_id"]`. This gives VGL a first-class bridge to DGL-style block workflows without forcing every sampler to change contracts. Local homogeneous `NodeNeighborSampler(..., output_blocks=True)` materializes `NodeBatch.blocks` through the same container while keeping the existing sampled `graph` and `seed_index` contract, and local homogeneous `LinkNeighborSampler(..., output_blocks=True)` now does the same for `LinkPredictionBatch.blocks` while preserving the existing link supervision fields.
 
 For same-type relations, the wrapped graph uses deterministic internal source/destination node stores while `Block` keeps the original `src_type` / `dst_type` visible to callers. For bipartite relations, the wrapped graph keeps the original endpoint node types. `Block.to(...)` and `Block.pin_memory()` mirror the existing graph/batch transfer behavior so block-aware code can participate in the same device pipeline.
 
@@ -77,16 +77,20 @@ Neighbor sampling now routes through explicit `SamplingPlan` stages inside `vgl.
 
 For node sampling, one plan context can now carry one seed or a rank-1 seed collection. Materialization keeps the sampled graph shared per context, then expands the supervision side into the existing flat `NodeBatch.seed_index` contract so models and tasks do not need a separate multi-seed batch type. On local homogeneous graphs, `NodeNeighborSampler(..., output_blocks=True)` also derives one block per hop from that sampled subgraph, ordered outer-to-inner, so block edges stay restricted to sampled fanout structure. Heterogeneous and coordinator-stitched node sampling still keep the sampled-subgraph-only contract in this batch.
 
+For link sampling, materialization keeps the existing `LinkPredictionBatch.graph`, `src_index`, `dst_index`, and `labels` contract. On local homogeneous graphs, `LinkNeighborSampler(..., output_blocks=True)` additionally derives one block per hop from the sampled message-passing graph, ordered outer-to-inner; if positive supervision edges are marked for exclusion, those edges are removed from the block message-passing view as well. Heterogeneous and coordinator-stitched link sampling still keep the sampled-subgraph-only contract in this batch.
+
 This keeps the user-facing API stable while opening a path toward larger-graph runtimes, feature stores, and shard-aware coordination.
 
 ## LinkPredictionRecord and LinkPredictionBatch
 
 `LinkPredictionRecord` is the explicit candidate-edge unit for link prediction training. Each record carries:
 
-- a homogeneous context `graph`
+- a context `graph`
 - `src_index`
 - `dst_index`
 - `label`
+- optional `edge_type` / `reverse_edge_type` metadata for heterogeneous or multi-relation supervision
+- optional per-hop `blocks` for local homogeneous block-aware link sampling
 
 `LinkPredictionBatch` collates these records into one model input while keeping link supervision explicit through:
 
@@ -94,6 +98,7 @@ This keeps the user-facing API stable while opening a path toward larger-graph r
 - `src_index`
 - `dst_index`
 - `labels`
+- optional `blocks` for local homogeneous block-aware link mini-batches
 
 ## TemporalEventRecord and TemporalEventBatch
 

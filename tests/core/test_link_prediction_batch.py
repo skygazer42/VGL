@@ -274,3 +274,36 @@ def test_link_prediction_batch_excludes_seed_edges_for_each_relation_in_mixed_he
     assert torch.equal(batch.graph.edges[writes].edge_index, torch.tensor([[1], [2]]))
     assert torch.equal(batch.graph.edges[reverse_writes].edge_index, torch.tensor([[2], [1]]))
     assert torch.equal(batch.graph.edges[cites].edge_index, torch.tensor([[0], [2]]))
+
+
+def test_link_prediction_batch_batches_block_layers_across_records():
+    g1 = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2], [1, 2, 3]], dtype=torch.long),
+        x=torch.randn(4, 4),
+        n_id=torch.tensor([10, 11, 12, 13], dtype=torch.long),
+        edge_data={"e_id": torch.tensor([100, 101, 102], dtype=torch.long)},
+    )
+    g2 = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2], [1, 2, 3]], dtype=torch.long),
+        x=torch.randn(4, 4),
+        n_id=torch.tensor([20, 21, 22, 23], dtype=torch.long),
+        edge_data={"e_id": torch.tensor([200, 201, 202], dtype=torch.long)},
+    )
+    g1_blocks = [g1.to_block(torch.tensor([1, 2, 3], dtype=torch.long)), g1.to_block(torch.tensor([2, 3], dtype=torch.long))]
+    g2_blocks = [g2.to_block(torch.tensor([1, 2, 3], dtype=torch.long)), g2.to_block(torch.tensor([2, 3], dtype=torch.long))]
+
+    batch = LinkPredictionBatch.from_records(
+        [
+            LinkPredictionRecord(graph=g1, src_index=1, dst_index=2, label=1, blocks=g1_blocks),
+            LinkPredictionRecord(graph=g2, src_index=1, dst_index=2, label=0, blocks=g2_blocks),
+        ]
+    )
+
+    assert batch.blocks is not None
+    assert len(batch.blocks) == 2
+    outer_block = batch.blocks[0]
+    inner_block = batch.blocks[1]
+    assert torch.equal(outer_block.src_n_id, torch.cat([g1_blocks[0].src_n_id, g2_blocks[0].src_n_id], dim=0))
+    assert torch.equal(outer_block.dst_n_id, torch.cat([g1_blocks[0].dst_n_id, g2_blocks[0].dst_n_id], dim=0))
+    assert torch.equal(inner_block.src_n_id, torch.cat([g1_blocks[1].src_n_id, g2_blocks[1].src_n_id], dim=0))
+    assert torch.equal(inner_block.dst_n_id, torch.cat([g1_blocks[1].dst_n_id, g2_blocks[1].dst_n_id], dim=0))

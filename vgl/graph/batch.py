@@ -75,9 +75,9 @@ def _unique_blocks(blocks: list[Block]) -> list[Block]:
     return unique
 
 
-def _batch_block_layer(blocks: list[Block]) -> Block:
+def _batch_block_layer(blocks: list[Block], *, context: str) -> Block:
     if not blocks:
-        raise ValueError("NodeBatch block layers require at least one block")
+        raise ValueError(f"{context} block layers require at least one block")
     if len(blocks) == 1:
         return blocks[0]
 
@@ -90,14 +90,14 @@ def _batch_block_layer(blocks: list[Block]) -> Block:
             or block.src_store_type != first_block.src_store_type
             or block.dst_store_type != first_block.dst_store_type
         ):
-            raise ValueError("NodeBatch requires matching block schemas when batching block layers")
+            raise ValueError(f"{context} requires matching block schemas when batching block layers")
 
     graphs = [block.graph for block in blocks]
     first_graph = graphs[0]
     if set(first_graph.nodes) == {"node"} and len(first_graph.edges) == 1:
-        graph, _ = _batch_homo_graphs(graphs, context="NodeBatch blocks")
+        graph, _ = _batch_homo_graphs(graphs, context=f"{context} blocks")
     else:
-        graph, _ = _batch_hetero_graphs(graphs, context="NodeBatch blocks")
+        graph, _ = _batch_hetero_graphs(graphs, context=f"{context} blocks")
     return Block(
         graph=graph,
         edge_type=first_block.edge_type,
@@ -110,18 +110,18 @@ def _batch_block_layer(blocks: list[Block]) -> Block:
     )
 
 
-def _batch_blocks(samples: list["SampleRecord"]) -> list[Block] | None:
-    if all(sample.blocks is None for sample in samples):
+def _batch_blocks(records, *, context: str) -> list[Block] | None:
+    if all(record.blocks is None for record in records):
         return None
-    if any(sample.blocks is None for sample in samples):
-        raise ValueError("NodeBatch requires blocks for every sample when any sample includes blocks")
+    if any(record.blocks is None for record in records):
+        raise ValueError(f"{context} requires blocks for every record when any record includes blocks")
 
-    num_layers = len(samples[0].blocks)
-    if any(len(sample.blocks) != num_layers for sample in samples):
-        raise ValueError("NodeBatch requires the same number of blocks for every sample")
+    num_layers = len(records[0].blocks)
+    if any(len(record.blocks) != num_layers for record in records):
+        raise ValueError(f"{context} requires the same number of blocks for every record")
 
     return [
-        _batch_block_layer(_unique_blocks([sample.blocks[layer] for sample in samples]))
+        _batch_block_layer(_unique_blocks([record.blocks[layer] for record in records]), context=context)
         for layer in range(num_layers)
     ]
 
@@ -576,7 +576,7 @@ class NodeBatch:
             graph=graph,
             seed_index=torch.tensor(seed_values, dtype=torch.long),
             metadata=[sample.metadata for sample in samples],
-            blocks=_batch_blocks(samples),
+            blocks=_batch_blocks(samples, context="NodeBatch"),
         )
 
     def to(self, device=None, dtype=None, non_blocking: bool = False):
@@ -617,6 +617,7 @@ class LinkPredictionBatch:
     query_index: torch.Tensor | None = None
     filter_mask: torch.Tensor | None = None
     metadata: list[dict] | None = None
+    blocks: list[Block] | None = None
 
     @classmethod
     def from_records(
@@ -741,6 +742,7 @@ class LinkPredictionBatch:
             query_index=query_index,
             filter_mask=filter_mask,
             metadata=[record.metadata for record in records],
+            blocks=_batch_blocks(records, context="LinkPredictionBatch"),
         )
 
     def to(self, device=None, dtype=None, non_blocking: bool = False):
@@ -793,6 +795,9 @@ class LinkPredictionBatch:
                 non_blocking=non_blocking,
             ),
             metadata=self.metadata,
+            blocks=None
+            if self.blocks is None
+            else [block.to(device=device, dtype=dtype, non_blocking=non_blocking) for block in self.blocks],
         )
 
     def pin_memory(self):
@@ -809,6 +814,7 @@ class LinkPredictionBatch:
             query_index=None if self.query_index is None else self.query_index.pin_memory(),
             filter_mask=None if self.filter_mask is None else self.filter_mask.pin_memory(),
             metadata=self.metadata,
+            blocks=None if self.blocks is None else [block.pin_memory() for block in self.blocks],
         )
 
 

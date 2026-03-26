@@ -289,7 +289,16 @@ class CandidateLinkSampler(UniformNegativeLinkSampler):
 
 
 class LinkNeighborSampler(Sampler):
-    def __init__(self, num_neighbors, *, base_sampler=None, seed=None, node_feature_names=None, edge_feature_names=None):
+    def __init__(
+        self,
+        num_neighbors,
+        *,
+        base_sampler=None,
+        seed=None,
+        node_feature_names=None,
+        edge_feature_names=None,
+        output_blocks: bool = False,
+    ):
         if isinstance(num_neighbors, int):
             num_neighbors = [num_neighbors]
         self.num_neighbors = [int(value) for value in num_neighbors]
@@ -300,6 +309,7 @@ class LinkNeighborSampler(Sampler):
         self.base_sampler = base_sampler
         self.node_feature_names = node_feature_names
         self.edge_feature_names = edge_feature_names
+        self.output_blocks = bool(output_blocks)
         self._generator = None
         if seed is not None:
             self._generator = torch.Generator()
@@ -375,19 +385,27 @@ class LinkNeighborSampler(Sampler):
             candidate_nodes = [candidate_nodes[index] for index in permutation]
         return set(candidate_nodes)
 
-    def _sample_node_ids(self, graph, records):
+    def _sample_node_ids(self, graph, records, *, return_hops: bool = False):
         visited = {
             int(node)
             for record in records
             for node in (record.src_index, record.dst_index)
         }
         frontier = set(visited)
+        hop_nodes = None
+        if return_hops:
+            hop_nodes = [torch.tensor(sorted(visited), dtype=torch.long, device=graph.edge_index.device)]
         for fanout in self.num_neighbors:
             frontier = self._next_frontier(graph, frontier, visited, fanout)
             visited.update(frontier)
-            if not frontier:
+            if hop_nodes is not None:
+                hop_nodes.append(torch.tensor(sorted(visited), dtype=torch.long, device=graph.edge_index.device))
+            elif not frontier:
                 break
-        return torch.tensor(sorted(visited), dtype=torch.long, device=graph.edge_index.device)
+        sampled = torch.tensor(sorted(visited), dtype=torch.long, device=graph.edge_index.device)
+        if hop_nodes is not None:
+            return sampled, hop_nodes
+        return sampled
 
     def _hetero_next_frontier(self, graph, frontier, visited, fanout):
         candidates = {node_type: set() for node_type in graph.schema.node_types}
@@ -578,16 +596,26 @@ class LinkNeighborSampler(Sampler):
             filter_ranking=bool(record.filter_ranking),
         )
 
-    def _sample_from_seed_records(self, records, *, is_sequence):
+    def _sample_from_seed_records(self, records, *, is_sequence, return_hops: bool = False):
         graph = records[0].graph
         if set(graph.nodes) == {"node"} and len(graph.edges) == 1:
-            node_ids = self._sample_node_ids(graph, records)
+            node_hops = None
+            sampled_node_ids = self._sample_node_ids(graph, records, return_hops=return_hops)
+            if return_hops:
+                node_ids, node_hops = sampled_node_ids
+            else:
+                node_ids = sampled_node_ids
             subgraph, node_mapping = self._subgraph(graph, node_ids)
             sampled = [self._local_record(record, subgraph, node_mapping) for record in records]
-        else:
-            node_ids_by_type = self._hetero_sample_node_ids(graph, records)
-            subgraph, node_mapping = self._hetero_subgraph(graph, node_ids_by_type)
-            sampled = [self._hetero_local_record(record, subgraph, node_mapping) for record in records]
+            sampled_payload = sampled if is_sequence else sampled[0]
+            if return_hops:
+                return sampled_payload, node_ids, node_hops
+            return sampled_payload
+        if return_hops:
+            raise ValueError("LinkNeighborSampler output_blocks currently supports homogeneous link sampling only")
+        node_ids_by_type = self._hetero_sample_node_ids(graph, records)
+        subgraph, node_mapping = self._hetero_subgraph(graph, node_ids_by_type)
+        sampled = [self._hetero_local_record(record, subgraph, node_mapping) for record in records]
         if is_sequence:
             return sampled
         return sampled[0]
@@ -595,6 +623,8 @@ class LinkNeighborSampler(Sampler):
     def build_plan(self, item) -> SamplingPlan:
         records, is_sequence = self._seed_records(item)
         graph = records[0].graph
+        if self.output_blocks and not (set(graph.nodes) == {"node"} and len(graph.edges) == 1):
+            raise ValueError("LinkNeighborSampler output_blocks currently supports homogeneous link sampling only")
         plan = SamplingPlan(
             request=LinkSeedRequest(
                 src_ids=torch.tensor([int(record.src_index) for record in records], dtype=torch.long),
@@ -610,6 +640,7 @@ class LinkNeighborSampler(Sampler):
                         "sampler": self,
                         "records": tuple(records),
                         "is_sequence": is_sequence,
+                        "output_blocks": self.output_blocks,
                     },
                 ),
             ),

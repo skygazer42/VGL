@@ -4,7 +4,7 @@ import torch
 
 from vgl.dataloading.executor import MaterializationContext
 from vgl.dataloading.records import LinkPredictionRecord, SampleRecord, TemporalEventRecord
-from vgl.graph.batch import GraphBatch, LinkPredictionBatch, NodeBatch, TemporalEventBatch
+from vgl.graph.batch import GraphBatch, LinkPredictionBatch, NodeBatch, TemporalEventBatch, _without_supervision_edges
 from vgl.graph.graph import Graph
 from vgl.ops.block import to_block
 
@@ -214,13 +214,47 @@ def _build_homo_blocks(subgraph: Graph, node_mapping: torch.Tensor, node_hops: l
     return [to_block(subgraph, dst_nodes) for dst_nodes in subgraph_hops[-2::-1]]
 
 
+def _build_homo_blocks_from_local_ids(subgraph: Graph, node_ids_local: torch.Tensor, node_hops: list[torch.Tensor]):
+    node_ids_local = torch.as_tensor(node_ids_local, dtype=torch.long).view(-1)
+    positions = {int(node_id): index for index, node_id in enumerate(node_ids_local.tolist())}
+    subgraph_hops = []
+    for hop_node_ids in node_hops:
+        hop_node_ids = torch.as_tensor(hop_node_ids, dtype=torch.long).view(-1)
+        subgraph_hops.append(
+            torch.tensor(
+                [positions[int(node_id)] for node_id in hop_node_ids.tolist()],
+                dtype=torch.long,
+                device=node_ids_local.device,
+            )
+        )
+    return [to_block(subgraph, dst_nodes) for dst_nodes in subgraph_hops[-2::-1]]
+
+
+def _link_message_passing_graph(graph: Graph, records: list[LinkPredictionRecord]) -> Graph:
+    supervision_edges = set()
+    for record in records:
+        if int(record.label) != 1:
+            continue
+        if not (bool(getattr(record, "exclude_seed_edge", False)) or bool(record.metadata.get("exclude_seed_edges", False))):
+            continue
+        supervision_edges.add((int(record.src_index), int(record.dst_index)))
+        reverse_edge_type = getattr(record, "reverse_edge_type", None)
+        if reverse_edge_type is None:
+            reverse_edge_type = record.metadata.get("reverse_edge_type")
+        if reverse_edge_type is not None:
+            supervision_edges.add((int(record.dst_index), int(record.src_index)))
+    return _without_supervision_edges(graph, supervision_edges)
+
+
 def _materialize_record_payload(context: MaterializationContext, payload):
     fetched_node_features = context.state.get("_materialized_node_features")
     fetched_edge_features = context.state.get("_materialized_edge_features")
-    if not fetched_node_features and not fetched_edge_features:
+    needs_link_blocks = "link_node_hops" in context.state and "link_node_ids_local" in context.state
+    if not fetched_node_features and not fetched_edge_features and not needs_link_blocks:
         return payload
 
     graph_cache = {}
+    link_blocks_cache = {}
 
     def _materialized_graph(graph):
         graph_id = id(graph)
@@ -234,8 +268,32 @@ def _materialize_record_payload(context: MaterializationContext, payload):
             graph_cache[graph_id] = materialized
         return materialized
 
+    def _materialized_link_blocks(records: list[LinkPredictionRecord], graph: Graph):
+        graph_id = id(graph)
+        blocks = link_blocks_cache.get(graph_id)
+        if blocks is None:
+            if not (set(graph.nodes) == {"node"} and len(graph.edges) == 1):
+                raise ValueError("link block materialization currently supports homogeneous graphs only")
+            message_passing_graph = _link_message_passing_graph(graph, records)
+            blocks = _build_homo_blocks_from_local_ids(
+                message_passing_graph,
+                context.state["link_node_ids_local"],
+                context.state["link_node_hops"],
+            )
+            link_blocks_cache[graph_id] = blocks
+        return blocks
+
+    def _replace_link_payload(records: list[LinkPredictionRecord]):
+        graph = _materialized_graph(records[0].graph)
+        blocks = _materialized_link_blocks(records, graph) if needs_link_blocks else None
+        return [replace(record, graph=graph, blocks=blocks) for record in records]
+
     if isinstance(payload, list):
+        if payload and all(isinstance(record, LinkPredictionRecord) for record in payload):
+            return _replace_link_payload(payload)
         return [replace(record, graph=_materialized_graph(record.graph)) for record in payload]
+    if isinstance(payload, LinkPredictionRecord):
+        return _replace_link_payload([payload])[0]
     return replace(payload, graph=_materialized_graph(payload.graph))
 
 
