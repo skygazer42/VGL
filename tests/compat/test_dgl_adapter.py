@@ -289,6 +289,32 @@ def test_temporal_graph_round_trips_time_attr_through_dgl_adapter(monkeypatch):
     assert torch.equal(restored.edges[edge_type].timestamp, torch.tensor([3, 5]))
 
 
+def test_featureless_storage_backed_graph_preserves_num_nodes_on_dgl_export(monkeypatch):
+    _install_fake_dgl(monkeypatch)
+
+    edge_type = ('node', 'to', 'node')
+    schema = GraphSchema(
+        node_types=('node',),
+        edge_types=(edge_type,),
+        node_features={'node': ()},
+        edge_features={edge_type: ('edge_index',)},
+    )
+    graph = Graph.from_storage(
+        schema=schema,
+        feature_store=FeatureStore({}),
+        graph_store=InMemoryGraphStore(
+            edges={edge_type: torch.tensor([[0, 1], [1, 0]])},
+            num_nodes={'node': 4},
+        ),
+    )
+
+    dgl_graph = graph.to_dgl()
+    restored = Graph.from_dgl(dgl_graph)
+
+    assert dgl_graph.num_nodes() == 4
+    assert torch.equal(restored.ndata['n_id'], torch.tensor([0, 1, 2, 3]))
+
+
 def test_storage_backed_graph_with_sparse_cache_round_trips_to_dgl(monkeypatch):
     _install_fake_dgl(monkeypatch)
 

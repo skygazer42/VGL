@@ -13,6 +13,7 @@ def test_in_memory_graph_store_returns_edge_indices_and_counts():
     store = InMemoryGraphStore({HOMO_EDGE: edge_index}, num_nodes={"node": 3})
 
     assert store.edge_types == (HOMO_EDGE,)
+    assert store.num_nodes() == 3
     assert torch.equal(store.edge_index(), edge_index)
     assert store.edge_count() == 3
 
@@ -23,6 +24,8 @@ def test_in_memory_graph_store_builds_type_aware_adjacency():
 
     adjacency = store.adjacency(edge_type=WRITES, layout="coo")
 
+    assert store.num_nodes("author") == 2
+    assert store.num_nodes("paper") == 3
     assert adjacency.layout is SparseLayout.COO
     assert adjacency.shape == (2, 3)
     assert adjacency.row.tolist() == [0, 1, 1]

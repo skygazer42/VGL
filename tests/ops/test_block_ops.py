@@ -2,8 +2,9 @@ import pytest
 import torch
 
 from vgl import Graph
-from vgl.graph import Block
+from vgl.graph import Block, GraphSchema
 from vgl.ops import to_block
+from vgl.storage import FeatureStore, InMemoryGraphStore
 
 
 def _transfer_device() -> str:
@@ -94,6 +95,33 @@ def test_to_block_handles_empty_incoming_frontier():
 
     assert torch.equal(block.dst_n_id, torch.tensor([0]))
     assert torch.equal(block.src_n_id, torch.tensor([0]))
+    assert torch.equal(block.edata["e_id"], torch.empty((0,), dtype=torch.long))
+    assert torch.equal(block.edge_index, torch.empty((2, 0), dtype=torch.long))
+
+
+def test_to_block_uses_graph_store_counts_for_featureless_storage_backed_graph():
+    edge_type = ("node", "to", "node")
+    schema = GraphSchema(
+        node_types=("node",),
+        edge_types=(edge_type,),
+        node_features={"node": ()},
+        edge_features={edge_type: ("edge_index",)},
+    )
+    graph = Graph.from_storage(
+        schema=schema,
+        feature_store=FeatureStore({}),
+        graph_store=InMemoryGraphStore(
+            {edge_type: torch.tensor([[0, 1], [1, 0]])},
+            num_nodes={"node": 4},
+        ),
+    )
+
+    block = to_block(graph, torch.tensor([3]))
+
+    assert torch.equal(block.dst_n_id, torch.tensor([3]))
+    assert torch.equal(block.src_n_id, torch.tensor([3]))
+    assert torch.equal(block.srcdata["n_id"], torch.tensor([3]))
+    assert torch.equal(block.dstdata["n_id"], torch.tensor([3]))
     assert torch.equal(block.edata["e_id"], torch.empty((0,), dtype=torch.long))
     assert torch.equal(block.edge_index, torch.empty((2, 0), dtype=torch.long))
 

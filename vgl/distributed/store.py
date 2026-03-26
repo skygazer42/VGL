@@ -33,6 +33,14 @@ class DistributedGraphStore(Protocol):
     def edge_types(self) -> tuple[EdgeType, ...]:
         ...
 
+    def num_nodes(
+        self,
+        node_type: str = "node",
+        *,
+        partition_id: int | None = None,
+    ) -> int:
+        ...
+
     def edge_index(
         self,
         edge_type: EdgeType | None = None,
@@ -88,6 +96,14 @@ class LocalGraphStoreAdapter:
     @property
     def edge_types(self) -> tuple[EdgeType, ...]:
         return self._store.edge_types
+
+    def num_nodes(
+        self,
+        node_type: str = "node",
+        *,
+        partition_id: int | None = None,
+    ) -> int:
+        return self._store.num_nodes(node_type)
 
     def edge_index(
         self,

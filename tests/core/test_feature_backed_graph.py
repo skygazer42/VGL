@@ -141,3 +141,78 @@ def test_graph_from_storage_retains_feature_store_context():
     graph = Graph.from_storage(schema=schema, feature_store=feature_store, graph_store=graph_store)
 
     assert graph.feature_store is feature_store
+
+
+def test_graph_from_storage_retains_graph_store_context():
+    schema = GraphSchema(
+        node_types=("node",),
+        edge_types=(HOMO_EDGE,),
+        node_features={"node": ()},
+        edge_features={HOMO_EDGE: ("edge_index",)},
+    )
+    graph_store = InMemoryGraphStore({HOMO_EDGE: torch.tensor([[0], [1]])}, num_nodes={"node": 2})
+
+    graph = Graph.from_storage(schema=schema, feature_store=FeatureStore({}), graph_store=graph_store)
+
+    assert graph.graph_store is graph_store
+
+
+def test_storage_backed_graph_transfer_preserves_graph_store_context():
+    schema = GraphSchema(
+        node_types=("node",),
+        edge_types=(HOMO_EDGE,),
+        node_features={"node": ()},
+        edge_features={HOMO_EDGE: ("edge_index",)},
+    )
+    graph_store = InMemoryGraphStore({HOMO_EDGE: torch.tensor([[0, 1], [1, 0]])}, num_nodes={"node": 4})
+    graph = Graph.from_storage(schema=schema, feature_store=FeatureStore({}), graph_store=graph_store)
+
+    moved = graph.to(device="cpu")
+
+    assert moved.graph_store is graph_store
+
+    pinned = graph.pin_memory()
+
+    assert pinned.graph_store is graph_store
+
+
+def test_featureless_storage_backed_homo_graph_preserves_adjacency_shape():
+    schema = GraphSchema(
+        node_types=("node",),
+        edge_types=(HOMO_EDGE,),
+        node_features={"node": ()},
+        edge_features={HOMO_EDGE: ("edge_index",)},
+    )
+    graph = Graph.from_storage(
+        schema=schema,
+        feature_store=FeatureStore({}),
+        graph_store=InMemoryGraphStore(
+            {HOMO_EDGE: torch.tensor([[0, 1], [1, 0]])},
+            num_nodes={"node": 4},
+        ),
+    )
+
+    adjacency = graph.adjacency()
+
+    assert adjacency.shape == (4, 4)
+
+
+def test_featureless_storage_backed_hetero_graph_preserves_adjacency_shape():
+    schema = GraphSchema(
+        node_types=("author", "paper"),
+        edge_types=(WRITES,),
+        node_features={"author": (), "paper": ()},
+        edge_features={WRITES: ("edge_index",)},
+    )
+    graph = Graph.from_storage(
+        schema=schema,
+        feature_store=FeatureStore({}),
+        graph_store=InMemoryGraphStore(
+            {WRITES: torch.tensor([[0], [1]])},
+            num_nodes={"author": 3, "paper": 4},
+        ),
+    )
+
+    adjacency = graph.adjacency(edge_type=WRITES)
+
+    assert adjacency.shape == (3, 4)

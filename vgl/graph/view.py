@@ -26,6 +26,9 @@ class GraphView:
         for value in store.data.values():
             if isinstance(value, torch.Tensor) and value.ndim > 0:
                 return int(value.size(0))
+        graph_store = self.graph_store
+        if graph_store is not None:
+            return int(graph_store.num_nodes(node_type))
         raise ValueError(f"Cannot infer node count for node type {node_type!r}")
 
     def __getattr__(self, name: str):
@@ -37,10 +40,13 @@ class GraphView:
             return nodes["node"].data[name]
         raise AttributeError(name)
 
-
     @property
     def feature_store(self):
         return getattr(self.base, "feature_store", None)
+
+    @property
+    def graph_store(self):
+        return getattr(self.base, "graph_store", None)
 
     @property
     def x(self):

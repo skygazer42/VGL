@@ -28,6 +28,7 @@ def test_local_graph_store_adapter_forwards_graph_queries():
     adjacency = adapter.adjacency(partition_id=3)
 
     assert adapter.edge_types == (("node", "to", "node"),)
+    assert adapter.num_nodes(partition_id=3) == 3
     assert torch.equal(adapter.edge_index(partition_id=3), torch.tensor([[0, 1], [1, 2]]))
     assert adapter.edge_count(partition_id=3) == 2
     assert adjacency.shape == (3, 3)

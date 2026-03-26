@@ -6,7 +6,7 @@
 
 Homogeneous graphs can carry edge-level tensors through `Graph.homo(edge_data={...})`. These tensors are exposed through `graph.edata` and are what edge-aware operators consume.
 
-`Graph` also has a storage-backed construction path. `Graph.from_storage(schema=..., feature_store=..., graph_store=...)` builds one graph view from feature / graph stores without changing the public graph contract. Structural data such as `edge_index` is available immediately, while node and edge features resolve lazily on first access and then stay cached on the store. Feature tensors can live in lightweight in-memory stores or in `MmapTensorStore` files backed by raw tensor buffers plus metadata sidecars for large feature tables. Storage-backed graphs also retain the originating `feature_store` on the graph object, so later plan-backed execution can reuse that source when no explicit override is supplied.
+`Graph` also has a storage-backed construction path. `Graph.from_storage(schema=..., feature_store=..., graph_store=...)` builds one graph view from feature / graph stores without changing the public graph contract. Structural data such as `edge_index` is available immediately, while node and edge features resolve lazily on first access and then stay cached on the store. Feature tensors can live in lightweight in-memory stores or in `MmapTensorStore` files backed by raw tensor buffers plus metadata sidecars for large feature tables. Storage-backed graphs also retain the originating `feature_store` and `graph_store` on the graph object, so later plan-backed execution can reuse those sources when no explicit override is supplied. That retained graph-store metadata is what lets featureless storage-backed graphs preserve declared node counts for adjacency views and other count-driven structure ops without inventing placeholder node features.
 
 ## SparseTensor and Adjacency Caches
 
@@ -18,7 +18,7 @@ Homogeneous graphs can carry edge-level tensors through `Graph.homo(edge_data={.
 
 ## GraphView
 
-`GraphView` is a lightweight projection over an existing graph, used for operations such as `snapshot()` and `window()`. Views continue to reference graph-level runtime context from the base graph, including retained storage-backed feature sources.
+`GraphView` is a lightweight projection over an existing graph, used for operations such as `snapshot()` and `window()`. Views continue to reference graph-level runtime context from the base graph, including retained storage-backed feature and graph sources.
 
 ## Block
 

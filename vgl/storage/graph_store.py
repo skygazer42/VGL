@@ -13,6 +13,9 @@ class GraphStore(Protocol):
     def edge_types(self) -> tuple[EdgeType, ...]:
         ...
 
+    def num_nodes(self, node_type: str = "node") -> int:
+        ...
+
     def edge_index(self, edge_type: EdgeType | None = None) -> torch.Tensor:
         ...
 
@@ -41,6 +44,9 @@ class InMemoryGraphStore:
     @property
     def edge_types(self) -> tuple[EdgeType, ...]:
         return tuple(self._edges)
+
+    def num_nodes(self, node_type: str = "node") -> int:
+        return int(self._num_nodes[str(node_type)])
 
     def _resolve_edge_type(self, edge_type: EdgeType | None) -> EdgeType:
         if edge_type is not None:

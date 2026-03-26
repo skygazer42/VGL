@@ -13,6 +13,7 @@ class Graph:
     nodes: dict[str, NodeStore]
     edges: dict[tuple[str, str, str], EdgeStore]
     feature_store: object | None = None
+    graph_store: object | None = None
 
     def _default_edge_type(self):
         edge_type = ("node", "to", "node")
@@ -27,6 +28,9 @@ class Graph:
         for value in store.data.values():
             if isinstance(value, torch.Tensor) and value.ndim > 0:
                 return int(value.size(0))
+        graph_store = object.__getattribute__(self, "graph_store")
+        if graph_store is not None:
+            return int(graph_store.num_nodes(node_type))
         raise ValueError(f"Cannot infer node count for node type {node_type!r}")
 
     def __getattr__(self, name: str):
@@ -113,7 +117,13 @@ class Graph:
             )
             for edge_type in schema.edge_types
         }
-        return cls(schema=schema, nodes=node_stores, edges=edge_stores, feature_store=feature_store)
+        return cls(
+            schema=schema,
+            nodes=node_stores,
+            edges=edge_stores,
+            feature_store=feature_store,
+            graph_store=graph_store,
+        )
 
     @classmethod
     def from_pyg(cls, data):
@@ -248,6 +258,7 @@ class Graph:
         return Graph(
             schema=self.schema,
             feature_store=self.feature_store,
+            graph_store=self.graph_store,
             nodes={
                 node_type: store.to(
                     device=device, dtype=dtype, non_blocking=non_blocking
@@ -262,11 +273,11 @@ class Graph:
             },
         )
 
-
     def pin_memory(self):
         return Graph(
             schema=self.schema,
             feature_store=self.feature_store,
+            graph_store=self.graph_store,
             nodes={node_type: store.pin_memory() for node_type, store in self.nodes.items()},
             edges={edge_type: store.pin_memory() for edge_type, store in self.edges.items()},
         )
