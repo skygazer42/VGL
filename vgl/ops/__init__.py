@@ -9,6 +9,7 @@ from vgl.ops.path import random_walk as random_walk
 from vgl.ops.pipeline import GraphTransform as GraphTransform
 from vgl.ops.pipeline import TransformPipeline as TransformPipeline
 from vgl.ops.query import adj as adj
+from vgl.ops.query import adj_external as adj_external
 from vgl.ops.query import adj_tensors as adj_tensors
 from vgl.ops.query import all_edges as all_edges
 from vgl.ops.query import edge_ids as edge_ids
@@ -54,6 +55,7 @@ __all__ = [
     "number_of_edges",
     "all_edges",
     "adj",
+    "adj_external",
     "adj_tensors",
     "inc",
     "in_degrees",

@@ -328,6 +328,48 @@ def adj(graph: Graph, *, edge_type=None, eweight_name: str | None = None, layout
     raise ValueError(f"Unsupported sparse layout: {layout}")
 
 
+def adj_external(graph: Graph, transpose: bool = False, *, scipy_fmt: str | None = None, edge_type=None):
+    edge_type = _resolve_edge_type(graph, edge_type)
+    store = graph.edges[edge_type]
+    ordered, _ = _ordered_edge_tensors(store)
+    src_type, _, dst_type = edge_type
+    shape = (graph._node_count(src_type), graph._node_count(dst_type))
+    row = ordered[0]
+    col = ordered[1]
+    if transpose:
+        row, col = col, row
+        shape = (shape[1], shape[0])
+
+    values = torch.ones(row.numel(), dtype=torch.float32, device=store.edge_index.device)
+    if scipy_fmt is None:
+        indices = torch.stack((row, col))
+        return torch.sparse_coo_tensor(indices, values, size=shape)
+
+    import scipy.sparse
+
+    if scipy_fmt == "coo":
+        return scipy.sparse.coo_matrix(
+            (values.cpu().numpy(), (row.cpu().numpy(), col.cpu().numpy())),
+            shape=shape,
+        )
+    if scipy_fmt == "csr":
+        crow_indices, col_indices, compressed_values = _compress_edge_payloads(
+            row,
+            col,
+            values,
+            major_size=shape[0],
+        )
+        return scipy.sparse.csr_matrix(
+            (
+                compressed_values.cpu().numpy(),
+                col_indices.cpu().numpy(),
+                crow_indices.cpu().numpy(),
+            ),
+            shape=shape,
+        )
+    raise ValueError("scipy_fmt must be one of None, 'coo', or 'csr'")
+
+
 def adj_tensors(graph: Graph, layout="coo", *, edge_type=None):
     from vgl.sparse import SparseLayout
 

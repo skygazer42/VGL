@@ -447,3 +447,26 @@ def test_featureless_storage_backed_adj_preserves_declared_node_space():
             ]
         ),
     )
+
+
+def test_featureless_storage_backed_adj_external_preserves_declared_node_space():
+    schema = GraphSchema(
+        node_types=("node",),
+        edge_types=(HOMO_EDGE,),
+        node_features={"node": ()},
+        edge_features={HOMO_EDGE: ("edge_index",)},
+    )
+    graph = Graph.from_storage(
+        schema=schema,
+        feature_store=FeatureStore({}),
+        graph_store=InMemoryGraphStore(
+            {HOMO_EDGE: torch.tensor([[0, 1], [1, 0]])},
+            num_nodes={"node": 4},
+        ),
+    )
+
+    adjacency = graph.adj_external()
+
+    assert adjacency.layout is torch.sparse_coo
+    assert tuple(adjacency.size()) == (4, 4)
+    assert torch.equal(adjacency._indices(), torch.tensor([[0, 1], [1, 0]]))

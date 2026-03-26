@@ -1,8 +1,9 @@
 import pytest
+import scipy.sparse
 import torch
 
 from vgl import Graph
-from vgl.ops import adj, adj_tensors, all_edges, edge_ids, find_edges, has_edges_between, in_degrees, in_edges, in_subgraph, num_edges, num_nodes, number_of_edges, number_of_nodes, out_degrees, out_edges, out_subgraph, predecessors, reverse, successors
+from vgl.ops import adj, adj_external, adj_tensors, all_edges, edge_ids, find_edges, has_edges_between, in_degrees, in_edges, in_subgraph, num_edges, num_nodes, number_of_edges, number_of_nodes, out_degrees, out_edges, out_subgraph, predecessors, reverse, successors
 from vgl.sparse import SparseLayout, to_coo
 
 
@@ -644,3 +645,61 @@ def test_adj_supports_selected_heterogeneous_relation_and_validates_weight_name(
 
     with pytest.raises(ValueError):
         adj(graph, edge_type=writes, eweight_name="missing")
+
+
+def test_adj_external_returns_torch_sparse_tensor_and_supports_transpose():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[2, 0, 1], [1, 1, 0]]),
+        x=torch.tensor([[1.0], [2.0], [3.0], [4.0]]),
+    )
+
+    adjacency = adj_external(graph)
+    transposed = adj_external(graph, transpose=True)
+
+    assert adjacency.layout is torch.sparse_coo
+    assert tuple(adjacency.size()) == (4, 4)
+    assert torch.equal(adjacency._indices(), torch.tensor([[2, 0, 1], [1, 1, 0]]))
+    assert torch.equal(adjacency._values(), torch.tensor([1.0, 1.0, 1.0]))
+    assert torch.equal(transposed._indices(), torch.tensor([[1, 1, 0], [2, 0, 1]]))
+    assert torch.equal(transposed._values(), torch.tensor([1.0, 1.0, 1.0]))
+
+
+def test_adj_external_supports_scipy_coo_and_csr_exports():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[2, 0, 1], [1, 1, 0]]),
+        x=torch.tensor([[1.0], [2.0], [3.0], [4.0]]),
+    )
+
+    coo = adj_external(graph, scipy_fmt="coo")
+    csr = adj_external(graph, scipy_fmt="csr", transpose=True)
+
+    assert isinstance(coo, scipy.sparse.coo_matrix)
+    assert coo.shape == (4, 4)
+    assert list(zip(coo.row.tolist(), coo.col.tolist(), coo.data.tolist())) == [(2, 1, 1.0), (0, 1, 1.0), (1, 0, 1.0)]
+    assert isinstance(csr, scipy.sparse.csr_matrix)
+    assert csr.shape == (4, 4)
+    assert list(zip(csr.tocoo().row.tolist(), csr.tocoo().col.tolist(), csr.tocoo().data.tolist())) == [(0, 1, 1.0), (1, 2, 1.0), (1, 0, 1.0)]
+
+
+def test_adj_external_supports_selected_heterogeneous_relation_and_validates_format():
+    writes = ("author", "writes", "paper")
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.tensor([[1.0], [2.0]])},
+            "paper": {"x": torch.tensor([[10.0], [20.0], [30.0]])},
+        },
+        edges={
+            writes: {"edge_index": torch.tensor([[1, 0], [2, 1]])},
+        },
+    )
+
+    coo = adj_external(graph, edge_type=writes, scipy_fmt="coo")
+    transposed = adj_external(graph, edge_type=writes, transpose=True)
+
+    assert coo.shape == (2, 3)
+    assert list(zip(coo.row.tolist(), coo.col.tolist(), coo.data.tolist())) == [(1, 2, 1.0), (0, 1, 1.0)]
+    assert tuple(transposed.size()) == (3, 2)
+    assert torch.equal(transposed._indices(), torch.tensor([[2, 1], [1, 0]]))
+
+    with pytest.raises(ValueError):
+        adj_external(graph, edge_type=writes, scipy_fmt="csc")

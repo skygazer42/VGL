@@ -243,3 +243,16 @@ def test_graph_adj_bridge_calls_ops_layer():
             ]
         ),
     )
+
+
+def test_graph_adj_external_bridge_calls_ops_layer():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[2, 0, 1], [1, 1, 0]]),
+        x=torch.tensor([[1.0], [2.0], [3.0], [4.0]]),
+    )
+
+    adjacency = graph.adj_external(transpose=True)
+
+    assert adjacency.layout is torch.sparse_coo
+    assert tuple(adjacency.size()) == (4, 4)
+    assert torch.equal(adjacency._indices(), torch.tensor([[1, 1, 0], [2, 0, 1]]))
