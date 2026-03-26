@@ -3,6 +3,18 @@ import torch
 
 from vgl import Graph
 from vgl.ops import all_edges, edge_ids, find_edges, has_edges_between, in_degrees, in_edges, in_subgraph, num_edges, num_nodes, number_of_edges, number_of_nodes, out_degrees, out_edges, predecessors, reverse, successors
+from vgl.sparse import SparseLayout, to_coo
+
+
+def _sparse_to_dense(sparse) -> torch.Tensor:
+    coo = to_coo(sparse)
+    dtype = torch.float32 if coo.values is None else coo.values.dtype
+    dense = torch.zeros(coo.shape, dtype=dtype)
+    if coo.nnz == 0:
+        return dense
+    values = torch.ones(coo.nnz, dtype=dtype) if coo.values is None else coo.values.cpu()
+    dense[coo.row.cpu(), coo.col.cpu()] = values
+    return dense
 
 
 def test_find_edges_returns_endpoints_for_requested_edge_ids():
@@ -371,3 +383,72 @@ def test_all_edges_validates_form_and_order():
 
     with pytest.raises(ValueError):
         all_edges(graph, order="bad")
+
+
+def test_incidence_sparse_view_supports_in_out_and_both_types():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1], [1, 2]]),
+        x=torch.tensor([[1.0], [2.0], [3.0]]),
+    )
+
+    inbound = graph.inc("in")
+    outbound = graph.inc("out")
+    both = graph.inc("both", layout=SparseLayout.CSR)
+
+    assert inbound.layout is SparseLayout.COO
+    assert inbound.shape == (3, 2)
+    assert torch.equal(_sparse_to_dense(inbound), torch.tensor([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]]))
+    assert torch.equal(_sparse_to_dense(outbound), torch.tensor([[1.0, 0.0], [0.0, 1.0], [0.0, 0.0]]))
+    assert both.layout is SparseLayout.CSR
+    assert torch.equal(_sparse_to_dense(both), torch.tensor([[-1.0, 0.0], [1.0, -1.0], [0.0, 1.0]]))
+
+
+def test_incidence_sparse_view_uses_public_edge_id_column_order_and_ignores_self_loops_for_both():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[2, 0, 1, 1], [0, 1, 2, 1]]),
+        x=torch.tensor([[1.0], [2.0], [3.0]]),
+        edge_data={"e_id": torch.tensor([0, 2, 1, 3])},
+    )
+
+    outbound = graph.inc("out")
+    both = graph.inc("both")
+
+    assert torch.equal(
+        _sparse_to_dense(outbound),
+        torch.tensor(
+            [
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 1.0, 0.0, 1.0],
+                [1.0, 0.0, 0.0, 0.0],
+            ]
+        ),
+    )
+    assert torch.equal(
+        _sparse_to_dense(both),
+        torch.tensor(
+            [
+                [1.0, 0.0, -1.0, 0.0],
+                [0.0, -1.0, 1.0, 0.0],
+                [-1.0, 1.0, 0.0, 0.0],
+            ]
+        ),
+    )
+
+
+def test_incidence_sparse_view_rejects_both_for_bipartite_relation_and_invalid_typestr():
+    writes = ("author", "writes", "paper")
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.tensor([[1.0], [2.0]])},
+            "paper": {"x": torch.tensor([[10.0], [20.0], [30.0]])},
+        },
+        edges={
+            writes: {"edge_index": torch.tensor([[0, 1], [1, 2]])},
+        },
+    )
+
+    with pytest.raises(ValueError):
+        graph.inc("both", edge_type=writes)
+
+    with pytest.raises(ValueError):
+        graph.inc("bad")

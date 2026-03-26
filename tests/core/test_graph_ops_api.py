@@ -1,6 +1,18 @@
 import torch
 
 from vgl import Graph
+from vgl.sparse import SparseLayout, to_coo
+
+
+def _sparse_to_dense(sparse) -> torch.Tensor:
+    coo = to_coo(sparse)
+    dtype = torch.float32 if coo.values is None else coo.values.dtype
+    dense = torch.zeros(coo.shape, dtype=dtype)
+    if coo.nnz == 0:
+        return dense
+    values = torch.ones(coo.nnz, dtype=dtype) if coo.values is None else coo.values.cpu()
+    dense[coo.row.cpu(), coo.col.cpu()] = values
+    return dense
 
 
 def test_graph_method_bridges_call_ops_layer():
@@ -172,3 +184,25 @@ def test_graph_cardinality_and_all_edges_bridges_call_ops_layer():
     assert torch.equal(src, torch.tensor([0, 1, 2]))
     assert torch.equal(dst, torch.tensor([1, 0, 0]))
     assert torch.equal(eids, torch.tensor([2, 1, 0]))
+
+
+def test_graph_inc_bridge_calls_ops_layer():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 1], [1, 2, 1]]),
+        x=torch.tensor([[1.0], [2.0], [3.0]]),
+    )
+
+    incidence = graph.inc("both", layout=SparseLayout.CSC)
+
+    assert incidence.layout is SparseLayout.CSC
+    assert incidence.shape == (3, 3)
+    assert torch.equal(
+        _sparse_to_dense(incidence),
+        torch.tensor(
+            [
+                [-1.0, 0.0, 0.0],
+                [1.0, -1.0, 0.0],
+                [0.0, 1.0, 0.0],
+            ]
+        ),
+    )

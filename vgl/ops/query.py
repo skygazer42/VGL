@@ -122,6 +122,14 @@ def _ordered_edge_positions(store, *, order) -> torch.Tensor:
     return positions
 
 
+def _normalize_sparse_layout(layout):
+    from vgl.sparse import SparseLayout
+
+    if isinstance(layout, str):
+        layout = SparseLayout(layout.lower())
+    return layout
+
+
 def _degrees_for_endpoint(graph: Graph, edge_type, nodes, *, endpoint: int):
     store = graph.edges[edge_type]
     node_ids, scalar_input = _normalize_optional_node_ids(nodes)
@@ -232,6 +240,58 @@ def all_edges(graph: Graph, *, form: str = "uv", order: str | None = "eid", edge
     store = graph.edges[edge_type]
     positions = _ordered_edge_positions(store, order=order)
     return _format_edge_selection(store, positions, form=form)
+
+
+def inc(graph: Graph, typestr: str = "both", *, layout="coo", edge_type=None):
+    from vgl.sparse import from_edge_index
+
+    edge_type = _resolve_edge_type(graph, edge_type)
+    layout = _normalize_sparse_layout(layout)
+    if typestr not in {"in", "out", "both"}:
+        raise ValueError("typestr must be one of 'in', 'out', or 'both'")
+
+    store = graph.edges[edge_type]
+    src_type, _, dst_type = edge_type
+    positions = _ordered_edge_positions(store, order="eid")
+    ordered = store.edge_index[:, positions] if positions.numel() > 0 else store.edge_index[:, :0]
+    edge_columns = torch.arange(positions.numel(), dtype=torch.long, device=store.edge_index.device)
+
+    if typestr == "in":
+        values = torch.ones(edge_columns.numel(), dtype=torch.float32, device=store.edge_index.device)
+        return from_edge_index(
+            torch.stack((ordered[1], edge_columns)),
+            shape=(graph._node_count(dst_type), edge_columns.numel()),
+            layout=layout,
+            values=values,
+        )
+
+    if typestr == "out":
+        values = torch.ones(edge_columns.numel(), dtype=torch.float32, device=store.edge_index.device)
+        return from_edge_index(
+            torch.stack((ordered[0], edge_columns)),
+            shape=(graph._node_count(src_type), edge_columns.numel()),
+            layout=layout,
+            values=values,
+        )
+
+    if src_type != dst_type:
+        raise ValueError("typestr='both' requires a relation with the same source and destination node type")
+
+    keep = ordered[0] != ordered[1]
+    rows = torch.cat((ordered[0, keep], ordered[1, keep]))
+    cols = torch.cat((edge_columns[keep], edge_columns[keep]))
+    values = torch.cat(
+        (
+            -torch.ones(int(keep.sum().item()), dtype=torch.float32, device=store.edge_index.device),
+            torch.ones(int(keep.sum().item()), dtype=torch.float32, device=store.edge_index.device),
+        )
+    )
+    return from_edge_index(
+        torch.stack((rows, cols)),
+        shape=(graph._node_count(src_type), edge_columns.numel()),
+        layout=layout,
+        values=values,
+    )
 
 
 def in_degrees(graph: Graph, v=None, *, edge_type=None):

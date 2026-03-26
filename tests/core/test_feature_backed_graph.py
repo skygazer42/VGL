@@ -2,6 +2,7 @@ import torch
 
 from vgl import Graph
 from vgl.graph import GraphSchema
+from vgl.sparse import to_coo
 from vgl.storage import FeatureStore, InMemoryGraphStore, InMemoryTensorStore
 from vgl.ops import in_subgraph, out_subgraph
 
@@ -27,6 +28,17 @@ class RecordingTensorStore:
 
 HOMO_EDGE = ("node", "to", "node")
 WRITES = ("author", "writes", "paper")
+
+
+def _sparse_to_dense(sparse) -> torch.Tensor:
+    coo = to_coo(sparse)
+    dtype = torch.float32 if coo.values is None else coo.values.dtype
+    dense = torch.zeros(coo.shape, dtype=dtype)
+    if coo.nnz == 0:
+        return dense
+    values = torch.ones(coo.nnz, dtype=dtype) if coo.values is None else coo.values.cpu()
+    dense[coo.row.cpu(), coo.col.cpu()] = values
+    return dense
 
 
 def test_graph_from_storage_resolves_homo_features_and_edges():
@@ -343,3 +355,35 @@ def test_featureless_storage_backed_cardinality_and_all_edges_preserve_declared_
     assert torch.equal(src, torch.tensor([0, 1]))
     assert torch.equal(dst, torch.tensor([1, 0]))
     assert torch.equal(eids, torch.tensor([0, 1]))
+
+
+def test_featureless_storage_backed_incidence_preserves_declared_node_space():
+    schema = GraphSchema(
+        node_types=("node",),
+        edge_types=(HOMO_EDGE,),
+        node_features={"node": ()},
+        edge_features={HOMO_EDGE: ("edge_index",)},
+    )
+    graph = Graph.from_storage(
+        schema=schema,
+        feature_store=FeatureStore({}),
+        graph_store=InMemoryGraphStore(
+            {HOMO_EDGE: torch.tensor([[0, 1], [1, 0]])},
+            num_nodes={"node": 4},
+        ),
+    )
+
+    incidence = graph.inc("in")
+
+    assert incidence.shape == (4, 2)
+    assert torch.equal(
+        _sparse_to_dense(incidence),
+        torch.tensor(
+            [
+                [0.0, 1.0],
+                [1.0, 0.0],
+                [0.0, 0.0],
+                [0.0, 0.0],
+            ]
+        ),
+    )

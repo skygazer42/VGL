@@ -12,6 +12,7 @@ from vgl.ops.query import all_edges as all_edges
 from vgl.ops.query import edge_ids as edge_ids
 from vgl.ops.query import find_edges as find_edges
 from vgl.ops.query import has_edges_between as has_edges_between
+from vgl.ops.query import inc as inc
 from vgl.ops.query import in_degrees as in_degrees
 from vgl.ops.query import in_edges as in_edges
 from vgl.ops.query import num_edges as num_edges
@@ -50,6 +51,7 @@ __all__ = [
     "num_edges",
     "number_of_edges",
     "all_edges",
+    "inc",
     "in_degrees",
     "out_degrees",
     "in_edges",

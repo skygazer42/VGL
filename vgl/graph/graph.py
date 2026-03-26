@@ -238,6 +238,11 @@ class Graph:
 
         return all_edges(self, form=form, order=order, edge_type=edge_type)
 
+    def inc(self, typestr: str = "both", *, layout="coo", edge_type=None):
+        from vgl.ops import inc
+
+        return inc(self, typestr=typestr, layout=layout, edge_type=edge_type)
+
     def in_subgraph(self, nodes):
         from vgl.ops import in_subgraph
 
