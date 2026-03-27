@@ -98,6 +98,12 @@ def test_release_workflows_exist_for_ci_and_pypi_publish():
     assert "testpypi" in publish_text.lower()
     assert "pypi" in publish_text.lower()
     assert "id-token: write" in publish_text
+    assert "PYPI_API_TOKEN" in publish_text
+    assert "TEST_PYPI_API_TOKEN" in publish_text
+    assert "Publish to PyPI with API token" in publish_text
+    assert "Publish to PyPI with Trusted Publishing" in publish_text
+    assert "Publish to TestPyPI with API token" in publish_text
+    assert "Publish to TestPyPI with Trusted Publishing" in publish_text
 
 
 def test_release_readme_documents_public_install_paths():
@@ -118,3 +124,7 @@ def test_release_readme_documents_public_install_paths():
     assert 'pip install "sky-vgl[full]"' in quickstart
     assert "sky-vgl project name" in releasing
     assert "sky-vgl` works in a clean environment" in releasing
+    assert "pending publisher" in releasing
+    assert "Manage Project -> Publishing" in releasing
+    assert "PYPI_API_TOKEN" in releasing
+    assert "TEST_PYPI_API_TOKEN" in releasing

@@ -26,6 +26,12 @@ cd /tmp
 
 Use the GitHub `publish` workflow in manual mode to publish to TestPyPI first.
 
+For first-time TestPyPI setup, a pending publisher is fine while the project does
+not exist yet. If you prefer token-based publishing instead, create an
+environment secret named `TEST_PYPI_API_TOKEN` on the GitHub `testpypi`
+environment; the workflow uses that secret when present and falls back to
+Trusted Publishing otherwise.
+
 After upload, verify:
 
 - the project page renders correctly
@@ -35,6 +41,15 @@ After upload, verify:
 ## PyPI
 
 Create a GitHub release after TestPyPI verification passes. The release workflow publishes with Trusted Publishing and uploads the already-built distribution artifacts to PyPI.
+
+Because `sky-vgl` already exists on PyPI, configure a normal trusted publisher
+under `Manage Project -> Publishing`; do not leave PyPI configured only with a
+pending publisher. Pending publishers are for first project creation and will
+fail for existing projects with an `invalid-pending-publisher` style error.
+
+If you prefer an explicit fallback, create an environment secret named
+`PYPI_API_TOKEN` on the GitHub `pypi` environment. The workflow uses that token
+when present and falls back to Trusted Publishing otherwise.
 
 ## Post-release verification
 
