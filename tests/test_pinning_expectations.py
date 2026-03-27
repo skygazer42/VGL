@@ -13,7 +13,12 @@ def test_assert_tensor_pin_state_accepts_driverless_fallback(monkeypatch):
 
 def test_assert_tensor_pin_state_accepts_pinned_tensor(monkeypatch):
     original = torch.tensor([1, 2, 3], dtype=torch.long)
-    pinned = original.pin_memory()
+
+    class FakePinnedTensor:
+        def is_pinned(self):
+            return True
+
+    pinned = FakePinnedTensor()
 
     monkeypatch.setattr("tests.pinning.pin_memory_supported", lambda: True)
 
