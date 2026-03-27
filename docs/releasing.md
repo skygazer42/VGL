@@ -10,17 +10,13 @@
 python -m pytest -q
 python -m build
 python -m twine check dist/*.whl dist/*.tar.gz
+python scripts/release_smoke.py --artifact-dir dist --kind all
 ```
 
-4. Smoke-test the built wheel from outside the repository root:
-
-```bash
-python -m venv /tmp/vgl-release-check
-/tmp/vgl-release-check/bin/pip install --upgrade pip
-/tmp/vgl-release-check/bin/pip install --no-deps dist/*.whl
-cd /tmp
-/tmp/vgl-release-check/bin/python -c "import vgl; print(vgl.__version__)"
-```
+4. Confirm the smoke script reports both wheel and sdist installs passing from
+outside the repository root. The script creates isolated virtual environments,
+installs the built artifacts, and verifies `import vgl`, `vgl.Graph`, and
+`vgl.Trainer` resolve from the installed distribution instead of the checkout.
 
 ## TestPyPI
 

@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+from vgl.version import __version__
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -78,14 +80,17 @@ def test_release_artifacts_exclude_internal_repo_only_content(built_release_arti
     assert any("/examples/homo/node_classification.py" in name for name in sdist_names)
     assert any(name.endswith("/README.md") for name in sdist_names)
     assert any(name.endswith("/LICENSE") for name in sdist_names)
+    assert any(name.endswith("/scripts/release_smoke.py") for name in sdist_names)
 
 
 def test_release_workflows_exist_for_ci_and_pypi_publish():
     ci_path = REPO_ROOT / ".github" / "workflows" / "ci.yml"
     publish_path = REPO_ROOT / ".github" / "workflows" / "publish.yml"
+    smoke_script = REPO_ROOT / "scripts" / "release_smoke.py"
 
     assert ci_path.exists()
     assert publish_path.exists()
+    assert smoke_script.exists()
 
     ci_text = ci_path.read_text(encoding="utf-8")
     publish_text = publish_path.read_text(encoding="utf-8")
@@ -93,6 +98,7 @@ def test_release_workflows_exist_for_ci_and_pypi_publish():
     assert "python -m pytest -q" in ci_text
     assert "python -m build" in ci_text
     assert "python -m twine check" in ci_text
+    assert "python scripts/release_smoke.py --artifact-dir dist --kind all" in ci_text
     assert "tags:" in publish_text
     assert "v*" in publish_text
     assert "testpypi" in publish_text.lower()
@@ -104,10 +110,33 @@ def test_release_workflows_exist_for_ci_and_pypi_publish():
     assert "needs.probe-publish-auth.outputs.has_pypi_api_token" in publish_text
     assert "needs.probe-publish-auth.outputs.has_test_pypi_api_token" in publish_text
     assert "GITHUB_OUTPUT" in publish_text
+    assert "python scripts/release_smoke.py --artifact-dir dist --kind all" in publish_text
     assert "Publish to PyPI with API token" in publish_text
     assert "Publish to PyPI with Trusted Publishing" in publish_text
     assert "Publish to TestPyPI with API token" in publish_text
     assert "Publish to TestPyPI with Trusted Publishing" in publish_text
+
+
+def test_release_smoke_script_can_install_built_wheel(built_release_artifacts):
+    wheel_path, _ = built_release_artifacts
+    smoke_script = REPO_ROOT / "scripts" / "release_smoke.py"
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(smoke_script),
+            "--artifact-dir",
+            str(wheel_path.parent),
+            "--kind",
+            "wheel",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert f"wheel smoke check passed for {wheel_path.name}" in completed.stdout
 
 
 def test_release_readme_documents_public_install_paths():
@@ -115,8 +144,10 @@ def test_release_readme_documents_public_install_paths():
     quickstart = (REPO_ROOT / "docs" / "quickstart.md").read_text(encoding="utf-8")
     releasing = (REPO_ROOT / "docs" / "releasing.md").read_text(encoding="utf-8")
 
-    assert "version-0.1.5" in readme
-    assert "Version 0.1.5" in readme
+    asset_base = "https://raw.githubusercontent.com/skygazer42/sky-vgl/main/assets/"
+
+    assert f"version-{__version__}" in readme
+    assert f"Version {__version__}" in readme
     assert 'pip install sky-vgl' in readme
     assert 'pip install "sky-vgl[full]"' in readme
     assert 'pip install "sky-vgl[networkx]"' in readme
@@ -124,6 +155,12 @@ def test_release_readme_documents_public_install_paths():
     assert 'pip install "sky-vgl[dgl]"' in readme
     assert "git clone https://github.com/skygazer42/sky-vgl.git" in readme
     assert "cd sky-vgl" in readme
+    assert 'src="assets/' not in readme
+    assert f'{asset_base}logo.svg' in readme
+    assert f'{asset_base}graph-types.svg' in readme
+    assert f'{asset_base}architecture.svg' in readme
+    assert f'{asset_base}pipeline.svg' in readme
+    assert f'{asset_base}conv-layers.svg' in readme
     assert "pip install sky-vgl" in quickstart
     assert 'pip install "sky-vgl[full]"' in quickstart
     assert "sky-vgl project name" in releasing
@@ -132,3 +169,4 @@ def test_release_readme_documents_public_install_paths():
     assert "Manage Project -> Publishing" in releasing
     assert "PYPI_API_TOKEN" in releasing
     assert "TEST_PYPI_API_TOKEN" in releasing
+    assert "python scripts/release_smoke.py --artifact-dir dist --kind all" in releasing

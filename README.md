@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.svg" width="420" alt="VGL – Versatile Graph Learning"/>
+  <img src="https://raw.githubusercontent.com/skygazer42/sky-vgl/main/assets/logo.svg" width="420" alt="VGL – Versatile Graph Learning"/>
 </p>
 
 <p align="center">
@@ -18,7 +18,7 @@
 **VGL** (Versatile Graph Learning) is a PyTorch-first graph learning library that provides **one canonical `Graph` abstraction** for homogeneous, heterogeneous, and temporal graphs — plus a batteries-included training pipeline from data loading to evaluation.
 
 <p align="center">
-  <img src="assets/graph-types.svg" width="780" alt="Supported Graph Types"/>
+  <img src="https://raw.githubusercontent.com/skygazer42/sky-vgl/main/assets/graph-types.svg" width="780" alt="Supported Graph Types"/>
 </p>
 
 ---
@@ -45,7 +45,7 @@
 ## Architecture
 
 <p align="center">
-  <img src="assets/architecture.svg" width="780" alt="VGL Architecture Overview"/>
+  <img src="https://raw.githubusercontent.com/skygazer42/sky-vgl/main/assets/architecture.svg" width="780" alt="VGL Architecture Overview"/>
 </p>
 
 | Package | Description |
@@ -81,7 +81,7 @@ These layers are intentionally underneath the user-facing API: models still cons
 ## Quick Tour
 
 <p align="center">
-  <img src="assets/pipeline.svg" width="780" alt="VGL Training Pipeline"/>
+  <img src="https://raw.githubusercontent.com/skygazer42/sky-vgl/main/assets/pipeline.svg" width="780" alt="VGL Training Pipeline"/>
 </p>
 
 ### Node Classification
@@ -398,7 +398,7 @@ Simple homogeneous graphs stay on DGL's lightweight `dgl.graph(...)` path. Typed
 ## Supported Convolution Layers
 
 <p align="center">
-  <img src="assets/conv-layers.svg" width="780" alt="VGL Convolution Layers"/>
+  <img src="https://raw.githubusercontent.com/skygazer42/sky-vgl/main/assets/conv-layers.svg" width="780" alt="VGL Convolution Layers"/>
 </p>
 
 All layers are built on the `MessagePassing` base class and share a consistent `forward(x, edge_index, ...)` interface.

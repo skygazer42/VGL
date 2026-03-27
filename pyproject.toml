@@ -89,6 +89,7 @@ include = [
   "/pyproject.toml",
   "/README.md",
   "/LICENSE",
+  "/scripts/release_smoke.py",
   "/vgl",
   "/examples",
   "/docs/core-concepts.md",
