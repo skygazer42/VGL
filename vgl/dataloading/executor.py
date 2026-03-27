@@ -50,6 +50,13 @@ def _resolve_link_record_edge_type(record) -> tuple[str, str, str]:
         raise ValueError("Link prediction on heterogeneous graphs requires edge_type") from exc
 
 
+def _single_link_record_edge_type(records) -> tuple[str, str, str] | None:
+    edge_types = tuple(dict.fromkeys(_resolve_link_record_edge_type(record) for record in records))
+    if len(edge_types) == 1:
+        return edge_types[0]
+    return None
+
+
 def _resolve_temporal_record_edge_type(record) -> tuple[str, str, str]:
     edge_type = getattr(record, "edge_type", None)
     if edge_type is None:
@@ -1820,7 +1827,7 @@ class PlanExecutor:
                     return_hops=True,
                 )
                 context.state["link_node_hops_by_type"] = link_node_hops_by_type
-                context.state["link_block_edge_type"] = _resolve_link_record_edge_type(records[0])
+                context.state["link_block_edge_type"] = _single_link_record_edge_type(records)
             else:
                 node_ids_by_type = _expand_stitched_hetero_global_node_ids(
                     context.feature_store,

@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING, Hashable, SupportsInt
 
 import torch
 
-from vgl.graph.block import Block
+from vgl.graph.block import Block, HeteroBlock
 from vgl.graph.graph import Graph
 from vgl.graph.stores import EdgeStore
 from vgl.graph.view import GraphView
@@ -63,7 +63,7 @@ def _unique_graphs(records):
     return graphs
 
 
-def _unique_blocks(blocks: list[Block]) -> list[Block]:
+def _unique_blocks(blocks: list[Block | HeteroBlock]) -> list[Block | HeteroBlock]:
     unique = []
     seen = set()
     for block in blocks:
@@ -75,7 +75,7 @@ def _unique_blocks(blocks: list[Block]) -> list[Block]:
     return unique
 
 
-def _batch_block_layer(blocks: list[Block], *, context: str) -> Block:
+def _batch_relation_block_layer(blocks: list[Block], *, context: str) -> Block:
     if not blocks:
         raise ValueError(f"{context} block layers require at least one block")
     if len(blocks) == 1:
@@ -110,7 +110,49 @@ def _batch_block_layer(blocks: list[Block], *, context: str) -> Block:
     )
 
 
-def _batch_blocks(records, *, context: str) -> list[Block] | None:
+def _batch_hetero_block_layer(blocks: list[HeteroBlock], *, context: str) -> HeteroBlock:
+    if not blocks:
+        raise ValueError(f"{context} block layers require at least one block")
+    if len(blocks) == 1:
+        return blocks[0]
+
+    first_block = blocks[0]
+    for block in blocks[1:]:
+        if (
+            block.edge_types != first_block.edge_types
+            or block.src_store_types != first_block.src_store_types
+            or block.dst_store_types != first_block.dst_store_types
+            or tuple(block.src_n_id) != tuple(first_block.src_n_id)
+            or tuple(block.dst_n_id) != tuple(first_block.dst_n_id)
+        ):
+            raise ValueError(f"{context} requires matching block schemas when batching block layers")
+
+    graph, _ = _batch_hetero_graphs([block.graph for block in blocks], context=f"{context} blocks")
+    return HeteroBlock(
+        graph=graph,
+        edge_types=first_block.edge_types,
+        src_n_id={
+            node_type: torch.cat([block.src_n_id[node_type] for block in blocks], dim=0)
+            for node_type in first_block.src_n_id
+        },
+        dst_n_id={
+            node_type: torch.cat([block.dst_n_id[node_type] for block in blocks], dim=0)
+            for node_type in first_block.dst_n_id
+        },
+        src_store_types=dict(first_block.src_store_types),
+        dst_store_types=dict(first_block.dst_store_types),
+    )
+
+
+def _batch_block_layer(blocks: list[Block | HeteroBlock], *, context: str) -> Block | HeteroBlock:
+    if all(isinstance(block, Block) for block in blocks):
+        return _batch_relation_block_layer(blocks, context=context)
+    if all(isinstance(block, HeteroBlock) for block in blocks):
+        return _batch_hetero_block_layer(blocks, context=context)
+    raise ValueError(f"{context} requires matching block container types when batching block layers")
+
+
+def _batch_blocks(records, *, context: str) -> list[Block | HeteroBlock] | None:
     if all(record.blocks is None for record in records):
         return None
     if any(record.blocks is None for record in records):
@@ -533,7 +575,7 @@ class NodeBatch:
     graph: Graph
     seed_index: torch.Tensor
     metadata: list[dict] | None = None
-    blocks: list[Block] | None = None
+    blocks: list[Block | HeteroBlock] | None = None
 
     @classmethod
     def from_samples(
@@ -617,7 +659,7 @@ class LinkPredictionBatch:
     query_index: torch.Tensor | None = None
     filter_mask: torch.Tensor | None = None
     metadata: list[dict] | None = None
-    blocks: list[Block] | None = None
+    blocks: list[Block | HeteroBlock] | None = None
 
     @classmethod
     def from_records(
@@ -633,7 +675,14 @@ class LinkPredictionBatch:
         edge_type_to_index = {edge_type: index for index, edge_type in enumerate(edge_types)}
         edge_type_index = torch.tensor([edge_type_to_index[edge_type] for edge_type in record_edge_types], dtype=torch.long)
         if len(edge_types) > 1 and any(record.blocks is not None for record in records):
-            raise ValueError("LinkPredictionBatch blocks require a single edge_type")
+            all_blocks = [
+                block
+                for record in records
+                if record.blocks is not None
+                for block in record.blocks
+            ]
+            if any(isinstance(block, Block) for block in all_blocks):
+                raise ValueError("LinkPredictionBatch blocks require a single edge_type")
 
         is_homo = set(first_graph.nodes) == {"node"} and len(first_graph.edges) == 1
         if is_homo:

@@ -13,7 +13,7 @@ from vgl.graph.batch import (
     _without_supervision_edges_for_type,
 )
 from vgl.graph.graph import Graph
-from vgl.ops.block import to_block
+from vgl.ops.block import to_block, to_hetero_block
 
 
 def _align_tensor_slice(index: torch.Tensor, tensor_slice) -> torch.Tensor:
@@ -264,6 +264,39 @@ def _build_hetero_blocks_from_local_ids(
     return [to_block(subgraph, dst_nodes, edge_type=edge_type) for dst_nodes in subgraph_hops[-2::-1]]
 
 
+def _build_full_hetero_blocks_from_local_ids(
+    subgraph: Graph,
+    node_hops_by_type: list[dict[str, torch.Tensor]],
+):
+    positions_by_type = {}
+    devices_by_type = {}
+    for node_type, store in subgraph.nodes.items():
+        node_ids = store.data.get("n_id")
+        if node_ids is None:
+            node_count = subgraph._node_count(node_type)
+            device = next(iter(store.data.values())).device
+            node_ids = torch.arange(node_count, dtype=torch.long, device=device)
+        node_ids = torch.as_tensor(node_ids, dtype=torch.long).view(-1)
+        positions_by_type[node_type] = {int(node_id): index for index, node_id in enumerate(node_ids.tolist())}
+        devices_by_type[node_type] = node_ids.device
+
+    subgraph_hops = []
+    for hop_nodes in node_hops_by_type:
+        dst_nodes_by_type = {}
+        for node_type in subgraph.schema.node_types:
+            hop_node_ids = torch.as_tensor(hop_nodes.get(node_type, ()), dtype=torch.long).view(-1)
+            dst_nodes_by_type[node_type] = torch.tensor(
+                [positions_by_type[node_type][int(node_id)] for node_id in hop_node_ids.tolist()],
+                dtype=torch.long,
+                device=devices_by_type[node_type],
+            )
+        subgraph_hops.append(dst_nodes_by_type)
+    return [
+        to_hetero_block(subgraph, dst_nodes_by_type, edge_types=tuple(subgraph.edges))
+        for dst_nodes_by_type in subgraph_hops[-2::-1]
+    ]
+
+
 def _link_message_passing_graph(graph: Graph, records: list[LinkPredictionRecord]) -> Graph:
     supervision_edges_by_type = {}
     reverse_supervision_edges = {}
@@ -302,10 +335,10 @@ def _materialize_record_payload(context: MaterializationContext, payload):
     fetched_node_features = context.state.get("_materialized_node_features")
     fetched_edge_features = context.state.get("_materialized_edge_features")
     needs_homo_node_blocks = "node_hops" in context.state
-    needs_hetero_node_blocks = "node_hops_by_type" in context.state and "node_block_edge_type" in context.state
+    needs_hetero_node_blocks = "node_hops_by_type" in context.state
     needs_node_blocks = needs_homo_node_blocks or needs_hetero_node_blocks
     needs_homo_link_blocks = "link_node_hops" in context.state and "link_node_ids_local" in context.state
-    needs_hetero_link_blocks = "link_node_hops_by_type" in context.state and "link_block_edge_type" in context.state
+    needs_hetero_link_blocks = "link_node_hops_by_type" in context.state
     needs_link_blocks = needs_homo_link_blocks or needs_hetero_link_blocks
     if not fetched_node_features and not fetched_edge_features and not needs_node_blocks and not needs_link_blocks:
         return payload
@@ -335,12 +368,14 @@ def _materialize_record_payload(context: MaterializationContext, payload):
                 if node_ids is None:
                     node_ids = torch.arange(graph.x.size(0), dtype=torch.long, device=graph.x.device)
                 blocks = _build_homo_blocks_from_local_ids(graph, node_ids, context.state["node_hops"])
-            else:
+            elif context.state.get("node_block_edge_type") is not None:
                 blocks = _build_hetero_blocks_from_local_ids(
                     graph,
                     context.state["node_hops_by_type"],
                     edge_type=context.state["node_block_edge_type"],
                 )
+            else:
+                blocks = _build_full_hetero_blocks_from_local_ids(graph, context.state["node_hops_by_type"])
             node_blocks_cache[cache_key] = blocks
         return blocks
 
@@ -355,11 +390,16 @@ def _materialize_record_payload(context: MaterializationContext, payload):
                     context.state["link_node_ids_local"],
                     context.state["link_node_hops"],
                 )
-            else:
+            elif context.state.get("link_block_edge_type") is not None:
                 blocks = _build_hetero_blocks_from_local_ids(
                     message_passing_graph,
                     context.state["link_node_hops_by_type"],
                     edge_type=context.state["link_block_edge_type"],
+                )
+            else:
+                blocks = _build_full_hetero_blocks_from_local_ids(
+                    message_passing_graph,
+                    context.state["link_node_hops_by_type"],
                 )
             link_blocks_cache[cache_key] = blocks
         return blocks
@@ -429,12 +469,18 @@ def _node_context_to_sample(context: MaterializationContext) -> SampleRecord | l
         if node_type != "node":
             raise ValueError("node block materialization currently supports homogeneous graphs only")
         blocks = _build_homo_blocks(subgraph, node_mapping, context.state["node_hops"])
-    elif "node_hops_by_type" in context.state and "node_block_edge_type" in context.state:
-        blocks = _build_hetero_blocks_from_local_ids(
-            subgraph,
-            context.state["node_hops_by_type"],
-            edge_type=context.state["node_block_edge_type"],
-        )
+    elif "node_hops_by_type" in context.state:
+        if context.state.get("node_block_edge_type") is not None:
+            blocks = _build_hetero_blocks_from_local_ids(
+                subgraph,
+                context.state["node_hops_by_type"],
+                edge_type=context.state["node_block_edge_type"],
+            )
+        else:
+            blocks = _build_full_hetero_blocks_from_local_ids(
+                subgraph,
+                context.state["node_hops_by_type"],
+            )
 
     samples = []
     for seed, subgraph_seed in zip(seeds, subgraph_seeds):

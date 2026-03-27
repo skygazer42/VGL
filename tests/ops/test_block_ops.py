@@ -254,6 +254,46 @@ def test_to_hetero_block_respects_relation_subset():
     assert torch.equal(block.dst_n_id["paper"], torch.tensor([0, 2]))
 
 
+def test_to_hetero_block_keeps_schema_stable_when_one_destination_frontier_is_empty():
+    writes = ("author", "writes", "paper")
+    written_by = ("paper", "written_by", "author")
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.tensor([[10.0], [20.0]])},
+            "paper": {"x": torch.tensor([[1.0], [2.0], [3.0]])},
+        },
+        edges={
+            writes: {"edge_index": torch.tensor([[0, 1, 1], [1, 0, 2]])},
+            written_by: {"edge_index": torch.tensor([[0, 2], [0, 1]])},
+        },
+    )
+
+    block = to_hetero_block(
+        graph,
+        {
+            "paper": torch.tensor([0]),
+            "author": torch.empty((0,), dtype=torch.long),
+        },
+    )
+
+    assert block.edge_types == (writes, written_by)
+    assert block.src_store_types == {"author": "author__src", "paper": "paper__src"}
+    assert block.dst_store_types == {"paper": "paper__dst", "author": "author__dst"}
+    assert set(block.graph.nodes) == {"author__src", "paper__src", "paper__dst", "author__dst"}
+    assert set(block.graph.edges) == {
+        ("author__src", "writes", "paper__dst"),
+        ("paper__src", "written_by", "author__dst"),
+    }
+    assert torch.equal(block.src_n_id["author"], torch.tensor([1]))
+    assert torch.equal(block.src_n_id["paper"], torch.empty((0,), dtype=torch.long))
+    assert torch.equal(block.dst_n_id["paper"], torch.tensor([0]))
+    assert torch.equal(block.dst_n_id["author"], torch.empty((0,), dtype=torch.long))
+    assert torch.equal(block.edata(writes)["e_id"], torch.tensor([1]))
+    assert torch.equal(block.edge_index(writes), torch.tensor([[0], [0]], dtype=torch.long))
+    assert torch.equal(block.edata(written_by)["e_id"], torch.empty((0,), dtype=torch.long))
+    assert torch.equal(block.edge_index(written_by), torch.empty((2, 0), dtype=torch.long))
+
+
 def test_hetero_block_to_moves_graph_and_metadata():
     writes = ("author", "writes", "paper")
     cites = ("paper", "cites", "paper")

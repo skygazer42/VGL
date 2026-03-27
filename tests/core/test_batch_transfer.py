@@ -1,6 +1,6 @@
 import torch
 
-from vgl import Graph
+from vgl import Graph, HeteroBlock
 from vgl.core.batch import GraphBatch, LinkPredictionBatch, NodeBatch, TemporalEventBatch
 
 
@@ -465,6 +465,73 @@ def test_node_batch_pin_memory_pins_blocks():
     assert not batch.blocks[0].src_n_id.is_pinned()
 
 
+def test_node_batch_to_moves_hetero_blocks():
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.randn(2, 4)},
+            "paper": {"x": torch.randn(3, 4)},
+        },
+        edges={
+            ("author", "writes", "paper"): {
+                "edge_index": torch.tensor([[0, 1, 1], [1, 0, 2]], dtype=torch.long),
+            },
+            ("paper", "cites", "paper"): {
+                "edge_index": torch.tensor([[0, 1, 2], [2, 2, 0]], dtype=torch.long),
+            },
+        },
+    )
+    block = graph.to_hetero_block({"paper": torch.tensor([0, 2], dtype=torch.long)})
+    batch = NodeBatch(
+        graph=graph,
+        seed_index=torch.tensor([0], dtype=torch.long),
+        blocks=[block],
+        metadata=[{"seed": 0, "node_type": "paper"}],
+    )
+
+    moved = batch.to(device=_transfer_device(), dtype=torch.float64)
+
+    assert moved is not batch
+    assert moved.blocks is not None
+    assert isinstance(moved.blocks[0], HeteroBlock)
+    assert moved.blocks[0] is not block
+    assert moved.blocks[0].src_n_id["author"].device.type == "meta"
+    assert moved.blocks[0].srcdata("paper")["x"].device.type == "meta"
+    assert batch.blocks[0].src_n_id["author"].device.type == "cpu"
+
+
+def test_node_batch_pin_memory_pins_hetero_blocks():
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.randn(2, 4)},
+            "paper": {"x": torch.randn(3, 4)},
+        },
+        edges={
+            ("author", "writes", "paper"): {
+                "edge_index": torch.tensor([[0, 1, 1], [1, 0, 2]], dtype=torch.long),
+            },
+            ("paper", "cites", "paper"): {
+                "edge_index": torch.tensor([[0, 1, 2], [2, 2, 0]], dtype=torch.long),
+            },
+        },
+    )
+    batch = NodeBatch(
+        graph=graph,
+        seed_index=torch.tensor([0], dtype=torch.long),
+        blocks=[graph.to_hetero_block({"paper": torch.tensor([0, 2], dtype=torch.long)})],
+        metadata=[{"seed": 0, "node_type": "paper"}],
+    )
+
+    pinned = batch.pin_memory()
+
+    assert pinned is not batch
+    assert pinned.blocks is not None
+    assert isinstance(pinned.blocks[0], HeteroBlock)
+    assert pinned.blocks[0].src_n_id["author"].is_pinned()
+    assert pinned.blocks[0].dst_n_id["paper"].is_pinned()
+    assert pinned.blocks[0].srcdata("paper")["x"].is_pinned()
+    assert not batch.blocks[0].src_n_id["author"].is_pinned()
+
+
 def test_link_prediction_batch_to_moves_blocks():
     graph = Graph.homo(
         edge_index=torch.tensor([[0, 1, 2], [1, 2, 3]], dtype=torch.long),
@@ -518,3 +585,75 @@ def test_link_prediction_batch_pin_memory_pins_blocks():
     assert pinned.blocks[0].dst_n_id.is_pinned()
     assert pinned.blocks[0].graph.nodes[pinned.blocks[0].src_store_type].data["n_id"].is_pinned()
     assert not batch.blocks[0].src_n_id.is_pinned()
+
+
+def test_link_prediction_batch_to_moves_hetero_blocks():
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.randn(2, 4)},
+            "paper": {"x": torch.randn(3, 4)},
+        },
+        edges={
+            ("author", "writes", "paper"): {
+                "edge_index": torch.tensor([[0, 1, 1], [1, 0, 2]], dtype=torch.long),
+            },
+            ("paper", "cites", "paper"): {
+                "edge_index": torch.tensor([[0, 1, 2], [2, 2, 0]], dtype=torch.long),
+            },
+        },
+    )
+    block = graph.to_hetero_block({"paper": torch.tensor([0, 2], dtype=torch.long)})
+    batch = LinkPredictionBatch(
+        graph=graph,
+        src_index=torch.tensor([1], dtype=torch.long),
+        dst_index=torch.tensor([0], dtype=torch.long),
+        labels=torch.tensor([1.0], dtype=torch.float32),
+        blocks=[block],
+        metadata=[{"label": 1, "edge_type": ("author", "writes", "paper")}],
+    )
+
+    moved = batch.to(device=_transfer_device(), dtype=torch.float64)
+
+    assert moved is not batch
+    assert moved.blocks is not None
+    assert isinstance(moved.blocks[0], HeteroBlock)
+    assert moved.blocks[0] is not block
+    assert moved.blocks[0].src_n_id["author"].device.type == "meta"
+    assert moved.blocks[0].dst_n_id["paper"].device.type == "meta"
+    assert moved.blocks[0].srcdata("paper")["x"].device.type == "meta"
+    assert batch.blocks[0].src_n_id["author"].device.type == "cpu"
+
+
+def test_link_prediction_batch_pin_memory_pins_hetero_blocks():
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.randn(2, 4)},
+            "paper": {"x": torch.randn(3, 4)},
+        },
+        edges={
+            ("author", "writes", "paper"): {
+                "edge_index": torch.tensor([[0, 1, 1], [1, 0, 2]], dtype=torch.long),
+            },
+            ("paper", "cites", "paper"): {
+                "edge_index": torch.tensor([[0, 1, 2], [2, 2, 0]], dtype=torch.long),
+            },
+        },
+    )
+    batch = LinkPredictionBatch(
+        graph=graph,
+        src_index=torch.tensor([1], dtype=torch.long),
+        dst_index=torch.tensor([0], dtype=torch.long),
+        labels=torch.tensor([1.0], dtype=torch.float32),
+        blocks=[graph.to_hetero_block({"paper": torch.tensor([0, 2], dtype=torch.long)})],
+        metadata=[{"label": 1, "edge_type": ("author", "writes", "paper")}],
+    )
+
+    pinned = batch.pin_memory()
+
+    assert pinned is not batch
+    assert pinned.blocks is not None
+    assert isinstance(pinned.blocks[0], HeteroBlock)
+    assert pinned.blocks[0].src_n_id["author"].is_pinned()
+    assert pinned.blocks[0].dst_n_id["paper"].is_pinned()
+    assert pinned.blocks[0].srcdata("paper")["x"].is_pinned()
+    assert not batch.blocks[0].src_n_id["author"].is_pinned()

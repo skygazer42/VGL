@@ -39,29 +39,21 @@ def _resolve_link_reverse_edge_type(record):
     return tuple(reverse_edge_type)
 
 
-def _single_link_edge_type(records, *, context: str) -> tuple[str, str, str]:
+def _single_link_edge_type(records, *, context: str) -> tuple[str, str, str] | None:
     edge_types = tuple(dict.fromkeys(_resolve_link_edge_type(record) for record in records))
-    if len(edge_types) != 1:
-        raise ValueError(f"{context} output_blocks requires a single edge_type")
-    return edge_types[0]
+    if len(edge_types) == 1:
+        return edge_types[0]
+    return None
 
 
-def _single_inbound_node_block_edge_type(graph: Graph, *, node_type: str, context: str) -> tuple[str, str, str]:
+def _single_inbound_node_block_edge_type(graph: Graph, *, node_type: str, context: str) -> tuple[str, str, str] | None:
     if set(graph.nodes) == {"node"} and len(graph.edges) == 1:
         return graph._default_edge_type()
 
     inbound_edge_types = tuple(edge_type for edge_type in graph.edges if edge_type[2] == node_type)
     if len(inbound_edge_types) == 1:
         return inbound_edge_types[0]
-    if not inbound_edge_types:
-        raise ValueError(
-            f"{context} output_blocks requires exactly one inbound edge_type for node_type {node_type!r}; found none"
-        )
-    formatted = ", ".join(str(edge_type) for edge_type in inbound_edge_types)
-    raise ValueError(
-        f"{context} output_blocks requires exactly one inbound edge_type for node_type {node_type!r}; "
-        f"found {len(inbound_edge_types)}: {formatted}"
-    )
+    return None
 
 
 def _resolve_temporal_edge_type(record):
