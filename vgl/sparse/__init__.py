@@ -1,9 +1,11 @@
 from vgl.sparse.base import SparseLayout as SparseLayout
 from vgl.sparse.base import SparseTensor as SparseTensor
 from vgl.sparse.convert import from_edge_index as from_edge_index
+from vgl.sparse.convert import from_torch_sparse as from_torch_sparse
 from vgl.sparse.convert import to_coo as to_coo
 from vgl.sparse.convert import to_csc as to_csc
 from vgl.sparse.convert import to_csr as to_csr
+from vgl.sparse.convert import to_torch_sparse as to_torch_sparse
 from vgl.sparse.ops import degree as degree
 from vgl.sparse.ops import edge_softmax as edge_softmax
 from vgl.sparse.ops import sddmm as sddmm
@@ -17,9 +19,11 @@ __all__ = [
     "SparseLayout",
     "SparseTensor",
     "from_edge_index",
+    "from_torch_sparse",
     "to_coo",
     "to_csr",
     "to_csc",
+    "to_torch_sparse",
     "degree",
     "select_rows",
     "select_cols",

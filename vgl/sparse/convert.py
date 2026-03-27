@@ -3,6 +3,65 @@ import torch
 from vgl.sparse.base import SparseLayout, SparseTensor
 
 
+def _sparse_shape_from_torch(tensor: torch.Tensor) -> tuple[int, int]:
+    if not hasattr(tensor, "sparse_dim") or int(tensor.sparse_dim()) != 2:
+        raise ValueError("torch sparse tensor must have exactly two sparse dimensions")
+    return int(tensor.shape[0]), int(tensor.shape[1])
+
+
+def _coo_indices_and_values(tensor: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    # Preserve duplicate entries and current ordering for uncoalesced COO inputs.
+    if bool(tensor.is_coalesced()):
+        return tensor.indices(), tensor.values()
+    return tensor._indices(), tensor._values()
+
+
+def _explicit_values_for_export(sparse: SparseTensor) -> torch.Tensor:
+    if sparse.values is not None:
+        return sparse.values
+    device = None
+    if sparse.layout is SparseLayout.COO:
+        device = sparse.row.device
+    elif sparse.layout is SparseLayout.CSR:
+        device = sparse.crow_indices.device
+    else:
+        device = sparse.ccol_indices.device
+    return torch.ones(sparse.nnz, dtype=torch.float32, device=device)
+
+
+def from_torch_sparse(tensor: torch.Tensor) -> SparseTensor:
+    layout = tensor.layout
+    if layout is torch.sparse_coo:
+        shape = _sparse_shape_from_torch(tensor)
+        indices, values = _coo_indices_and_values(tensor)
+        return SparseTensor(
+            layout=SparseLayout.COO,
+            shape=shape,
+            row=indices[0],
+            col=indices[1],
+            values=values,
+        )
+    if layout is torch.sparse_csr:
+        shape = _sparse_shape_from_torch(tensor)
+        return SparseTensor(
+            layout=SparseLayout.CSR,
+            shape=shape,
+            crow_indices=tensor.crow_indices(),
+            col_indices=tensor.col_indices(),
+            values=tensor.values(),
+        )
+    if layout is torch.sparse_csc:
+        shape = _sparse_shape_from_torch(tensor)
+        return SparseTensor(
+            layout=SparseLayout.CSC,
+            shape=shape,
+            ccol_indices=tensor.ccol_indices(),
+            row_indices=tensor.row_indices(),
+            values=tensor.values(),
+        )
+    raise ValueError("from_torch_sparse expects a torch sparse tensor in COO, CSR, or CSC layout")
+
+
 def from_edge_index(
     edge_index: torch.Tensor,
     *,
@@ -98,3 +157,26 @@ def to_csc(sparse: SparseTensor) -> SparseTensor:
         row_indices=row,
         values=values,
     )
+
+
+def to_torch_sparse(sparse: SparseTensor) -> torch.Tensor:
+    values = _explicit_values_for_export(sparse)
+    size = tuple(sparse.shape) + tuple(values.shape[1:])
+    if sparse.layout is SparseLayout.COO:
+        indices = torch.stack((sparse.row, sparse.col))
+        return torch.sparse_coo_tensor(indices, values, size=size)
+    if sparse.layout is SparseLayout.CSR:
+        return torch.sparse_csr_tensor(
+            sparse.crow_indices,
+            sparse.col_indices,
+            values,
+            size=size,
+        )
+    if sparse.layout is SparseLayout.CSC:
+        return torch.sparse_csc_tensor(
+            sparse.ccol_indices,
+            sparse.row_indices,
+            values,
+            size=size,
+        )
+    raise ValueError(f"Unsupported sparse layout: {sparse.layout}")

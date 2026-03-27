@@ -277,19 +277,21 @@ def test_foundation_packages_expose_namespace_exports():
     from vgl.ops import __all__ as ops_all
     from vgl.sparse import SparseLayout, SparseTensor
     from vgl.sparse import __all__ as sparse_all
-    from vgl.sparse import degree, edge_softmax, from_edge_index, sddmm, select_cols, select_rows, spmm, sum as sparse_sum, to_coo, to_csc, to_csr, transpose
+    from vgl.sparse import degree, edge_softmax, from_edge_index, from_torch_sparse, sddmm, select_cols, select_rows, spmm, sum as sparse_sum, to_coo, to_csc, to_csr, to_torch_sparse, transpose
     from vgl.storage import FeatureStore, GraphStore, InMemoryGraphStore, InMemoryTensorStore, MmapTensorStore, TensorSlice, TensorStore
     from vgl.storage import __all__ as storage_all
 
     assert ops_all == ["GraphTransform", "TransformPipeline", "add_self_loops", "remove_self_loops", "to_bidirected", "reverse", "line_graph", "metapath_reachable_graph", "random_walk", "metapath_random_walk", "find_edges", "edge_ids", "has_edges_between", "num_nodes", "number_of_nodes", "num_edges", "number_of_edges", "all_edges", "formats", "create_formats_", "adj", "adj_external", "adj_tensors", "inc", "in_degrees", "out_degrees", "in_edges", "out_edges", "predecessors", "successors", "node_subgraph", "edge_subgraph", "in_subgraph", "out_subgraph", "khop_nodes", "khop_subgraph", "compact_nodes", "to_block", "to_hetero_block"]
-    assert sparse_all == ["SparseLayout", "SparseTensor", "from_edge_index", "to_coo", "to_csr", "to_csc", "degree", "select_rows", "select_cols", "transpose", "sum", "spmm", "sddmm", "edge_softmax"]
+    assert sparse_all == ["SparseLayout", "SparseTensor", "from_edge_index", "from_torch_sparse", "to_coo", "to_csr", "to_csc", "to_torch_sparse", "degree", "select_rows", "select_cols", "transpose", "sum", "spmm", "sddmm", "edge_softmax"]
     assert storage_all == ["TensorSlice", "TensorStore", "InMemoryTensorStore", "MmapTensorStore", "FeatureStore", "GraphStore", "InMemoryGraphStore"]
     assert SparseLayout.__name__ == "SparseLayout"
     assert SparseTensor.__name__ == "SparseTensor"
     assert callable(from_edge_index)
+    assert callable(from_torch_sparse)
     assert callable(to_coo)
     assert callable(to_csr)
     assert callable(to_csc)
+    assert callable(to_torch_sparse)
     assert GraphTransform.__name__ == "GraphTransform"
     assert TransformPipeline.__name__ == "TransformPipeline"
     assert callable(add_self_loops)
