@@ -1,5 +1,6 @@
 import torch
 
+from tests.pinning import assert_tensor_pin_state
 from vgl import Graph, HeteroBlock
 from vgl.core.batch import GraphBatch, LinkPredictionBatch, NodeBatch, TemporalEventBatch
 
@@ -71,13 +72,13 @@ def test_graph_batch_pin_memory_pins_graphs_and_batch_tensors():
     pinned = batch.pin_memory()
 
     assert pinned is not batch
-    assert pinned.graphs[0].x.is_pinned()
-    assert pinned.graphs[1].x.is_pinned()
-    assert pinned.graph_index.is_pinned()
+    assert_tensor_pin_state(pinned.graphs[0].x)
+    assert_tensor_pin_state(pinned.graphs[1].x)
+    assert_tensor_pin_state(pinned.graph_index)
     assert pinned.graph_ptr is not None
-    assert pinned.graph_ptr.is_pinned()
+    assert_tensor_pin_state(pinned.graph_ptr)
     assert pinned.labels is not None
-    assert pinned.labels.is_pinned()
+    assert_tensor_pin_state(pinned.labels)
     assert pinned.metadata is batch.metadata
     assert not batch.graph_index.is_pinned()
 
@@ -156,13 +157,13 @@ def test_graph_batch_pin_memory_pins_typed_membership_tensors_for_hetero_batches
     pinned = batch.pin_memory()
 
     assert pinned is not batch
-    assert pinned.graphs[0].nodes["paper"].x.is_pinned()
+    assert_tensor_pin_state(pinned.graphs[0].nodes["paper"].x)
     assert pinned.graph_index is None
     assert pinned.graph_ptr is None
-    assert pinned.graph_index_by_type["paper"].is_pinned()
-    assert pinned.graph_ptr_by_type["author"].is_pinned()
+    assert_tensor_pin_state(pinned.graph_index_by_type["paper"])
+    assert_tensor_pin_state(pinned.graph_ptr_by_type["author"])
     assert pinned.labels is not None
-    assert pinned.labels.is_pinned()
+    assert_tensor_pin_state(pinned.labels)
     assert pinned.metadata is batch.metadata
 
 
@@ -197,8 +198,8 @@ def test_node_batch_pin_memory_pins_graph_and_seed_index():
     pinned = batch.pin_memory()
 
     assert pinned is not batch
-    assert pinned.graph.x.is_pinned()
-    assert pinned.seed_index.is_pinned()
+    assert_tensor_pin_state(pinned.graph.x)
+    assert_tensor_pin_state(pinned.seed_index)
     assert pinned.metadata is batch.metadata
     assert not batch.seed_index.is_pinned()
 
@@ -252,14 +253,14 @@ def test_link_prediction_batch_pin_memory_pins_all_transfer_fields():
     pinned = batch.pin_memory()
 
     assert pinned is not batch
-    assert pinned.graph.x.is_pinned()
-    assert pinned.src_index.is_pinned()
-    assert pinned.dst_index.is_pinned()
-    assert pinned.labels.is_pinned()
+    assert_tensor_pin_state(pinned.graph.x)
+    assert_tensor_pin_state(pinned.src_index)
+    assert_tensor_pin_state(pinned.dst_index)
+    assert_tensor_pin_state(pinned.labels)
     assert pinned.query_index is not None
-    assert pinned.query_index.is_pinned()
+    assert_tensor_pin_state(pinned.query_index)
     assert pinned.filter_mask is not None
-    assert pinned.filter_mask.is_pinned()
+    assert_tensor_pin_state(pinned.filter_mask)
     assert pinned.metadata is batch.metadata
     assert not batch.src_index.is_pinned()
 
@@ -312,13 +313,13 @@ def test_temporal_event_batch_pin_memory_pins_all_transfer_fields():
     pinned = batch.pin_memory()
 
     assert pinned is not batch
-    assert pinned.graph.nodes["node"].x.is_pinned()
-    assert pinned.src_index.is_pinned()
-    assert pinned.dst_index.is_pinned()
-    assert pinned.timestamp.is_pinned()
-    assert pinned.labels.is_pinned()
+    assert_tensor_pin_state(pinned.graph.nodes["node"].x)
+    assert_tensor_pin_state(pinned.src_index)
+    assert_tensor_pin_state(pinned.dst_index)
+    assert_tensor_pin_state(pinned.timestamp)
+    assert_tensor_pin_state(pinned.labels)
     assert pinned.event_features is not None
-    assert pinned.event_features.is_pinned()
+    assert_tensor_pin_state(pinned.event_features)
     assert pinned.metadata is batch.metadata
     assert not batch.src_index.is_pinned()
 
@@ -403,11 +404,11 @@ def test_temporal_event_batch_pin_memory_pins_typed_temporal_fields():
     pinned = batch.pin_memory()
 
     assert pinned is not batch
-    assert pinned.graph.nodes["author"].x.is_pinned()
-    assert pinned.src_index.is_pinned()
-    assert pinned.dst_index.is_pinned()
+    assert_tensor_pin_state(pinned.graph.nodes["author"].x)
+    assert_tensor_pin_state(pinned.src_index)
+    assert_tensor_pin_state(pinned.dst_index)
     assert pinned.edge_type_index is not None
-    assert pinned.edge_type_index.is_pinned()
+    assert_tensor_pin_state(pinned.edge_type_index)
     assert pinned.edge_type == edge_type
     assert pinned.src_node_type == "author"
     assert pinned.dst_node_type == "paper"
@@ -459,9 +460,9 @@ def test_node_batch_pin_memory_pins_blocks():
 
     assert pinned is not batch
     assert pinned.blocks is not None
-    assert pinned.blocks[0].src_n_id.is_pinned()
-    assert pinned.blocks[0].dst_n_id.is_pinned()
-    assert pinned.blocks[0].graph.nodes[pinned.blocks[0].src_store_type].data["n_id"].is_pinned()
+    assert_tensor_pin_state(pinned.blocks[0].src_n_id)
+    assert_tensor_pin_state(pinned.blocks[0].dst_n_id)
+    assert_tensor_pin_state(pinned.blocks[0].graph.nodes[pinned.blocks[0].src_store_type].data["n_id"])
     assert not batch.blocks[0].src_n_id.is_pinned()
 
 
@@ -526,9 +527,9 @@ def test_node_batch_pin_memory_pins_hetero_blocks():
     assert pinned is not batch
     assert pinned.blocks is not None
     assert isinstance(pinned.blocks[0], HeteroBlock)
-    assert pinned.blocks[0].src_n_id["author"].is_pinned()
-    assert pinned.blocks[0].dst_n_id["paper"].is_pinned()
-    assert pinned.blocks[0].srcdata("paper")["x"].is_pinned()
+    assert_tensor_pin_state(pinned.blocks[0].src_n_id["author"])
+    assert_tensor_pin_state(pinned.blocks[0].dst_n_id["paper"])
+    assert_tensor_pin_state(pinned.blocks[0].srcdata("paper")["x"])
     assert not batch.blocks[0].src_n_id["author"].is_pinned()
 
 
@@ -581,9 +582,9 @@ def test_link_prediction_batch_pin_memory_pins_blocks():
 
     assert pinned is not batch
     assert pinned.blocks is not None
-    assert pinned.blocks[0].src_n_id.is_pinned()
-    assert pinned.blocks[0].dst_n_id.is_pinned()
-    assert pinned.blocks[0].graph.nodes[pinned.blocks[0].src_store_type].data["n_id"].is_pinned()
+    assert_tensor_pin_state(pinned.blocks[0].src_n_id)
+    assert_tensor_pin_state(pinned.blocks[0].dst_n_id)
+    assert_tensor_pin_state(pinned.blocks[0].graph.nodes[pinned.blocks[0].src_store_type].data["n_id"])
     assert not batch.blocks[0].src_n_id.is_pinned()
 
 
@@ -653,7 +654,7 @@ def test_link_prediction_batch_pin_memory_pins_hetero_blocks():
     assert pinned is not batch
     assert pinned.blocks is not None
     assert isinstance(pinned.blocks[0], HeteroBlock)
-    assert pinned.blocks[0].src_n_id["author"].is_pinned()
-    assert pinned.blocks[0].dst_n_id["paper"].is_pinned()
-    assert pinned.blocks[0].srcdata("paper")["x"].is_pinned()
+    assert_tensor_pin_state(pinned.blocks[0].src_n_id["author"])
+    assert_tensor_pin_state(pinned.blocks[0].dst_n_id["paper"])
+    assert_tensor_pin_state(pinned.blocks[0].srcdata("paper")["x"])
     assert not batch.blocks[0].src_n_id["author"].is_pinned()

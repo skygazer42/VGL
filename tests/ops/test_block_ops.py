@@ -1,6 +1,7 @@
 import pytest
 import torch
 
+from tests.pinning import assert_tensor_pin_state
 from vgl import Graph
 from vgl.graph import Block, GraphSchema, HeteroBlock
 from vgl.ops import to_block, to_hetero_block
@@ -177,10 +178,10 @@ def test_block_pin_memory_pins_graph_and_metadata():
     pinned = block.pin_memory()
 
     assert pinned is not block
-    assert pinned.src_n_id.is_pinned()
-    assert pinned.dst_n_id.is_pinned()
-    assert pinned.srcdata["x"].is_pinned()
-    assert pinned.edge_index.is_pinned()
+    assert_tensor_pin_state(pinned.src_n_id)
+    assert_tensor_pin_state(pinned.dst_n_id)
+    assert_tensor_pin_state(pinned.srcdata["x"])
+    assert_tensor_pin_state(pinned.edge_index)
     assert not block.src_n_id.is_pinned()
 
 
@@ -338,9 +339,9 @@ def test_hetero_block_pin_memory_pins_graph_and_metadata():
     pinned = block.pin_memory()
 
     assert pinned is not block
-    assert pinned.src_n_id["author"].is_pinned()
-    assert pinned.src_n_id["paper"].is_pinned()
-    assert pinned.dst_n_id["paper"].is_pinned()
-    assert pinned.srcdata("paper")["x"].is_pinned()
-    assert pinned.edge_index(cites).is_pinned()
+    assert_tensor_pin_state(pinned.src_n_id["author"])
+    assert_tensor_pin_state(pinned.src_n_id["paper"])
+    assert_tensor_pin_state(pinned.dst_n_id["paper"])
+    assert_tensor_pin_state(pinned.srcdata("paper")["x"])
+    assert_tensor_pin_state(pinned.edge_index(cites))
     assert not block.src_n_id["author"].is_pinned()

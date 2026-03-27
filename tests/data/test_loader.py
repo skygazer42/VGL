@@ -1,6 +1,7 @@
 import pytest
 import torch
 
+from tests.pinning import assert_tensor_pin_state
 from vgl import Graph
 from vgl.data.dataset import ListDataset
 from vgl.data.loader import Loader
@@ -157,7 +158,7 @@ def test_loader_can_pin_built_batch_tensors():
 
     batch = next(iter(loader))
 
-    assert batch.graphs[0].x.is_pinned()
+    assert_tensor_pin_state(batch.graphs[0].x)
 
 
 class PlanBackedGraphSampler:

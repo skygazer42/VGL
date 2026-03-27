@@ -1,5 +1,6 @@
 import torch
 
+from tests.pinning import assert_tensor_pin_state
 from vgl import Graph
 from vgl.graph.stores import EdgeStore, NodeStore
 
@@ -36,7 +37,7 @@ def test_edge_store_pin_memory_pins_tensors_and_preserves_non_tensors():
     assert pinned is not store
     assert pinned.type_name == store.type_name
     assert pinned.data is not store.data
-    assert pinned.edge_index.is_pinned()
+    assert_tensor_pin_state(pinned.edge_index)
     assert torch.equal(pinned.edge_index, edge_index)
     assert pinned.data["meta"] is meta
     assert not store.edge_index.is_pinned()
