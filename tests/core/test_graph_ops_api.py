@@ -161,6 +161,20 @@ def test_graph_query_and_reverse_bridges_call_ops_layer():
     assert torch.equal(reversed_graph.edata["e_id"], torch.tensor([0, 1, 2, 3]))
 
 
+def test_graph_to_simple_bridge_calls_ops_layer():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 0, 1, 0], [1, 1, 2, 1]]),
+        x=torch.tensor([[1.0], [2.0], [3.0]]),
+        edge_data={"weight": torch.tensor([1.0, 2.0, 3.0, 4.0])},
+    )
+
+    simplified = graph.to_simple(count_attr="count")
+
+    assert torch.equal(simplified.edge_index, torch.tensor([[0, 1], [1, 2]]))
+    assert torch.equal(simplified.edata["weight"], torch.tensor([1.0, 3.0]))
+    assert torch.equal(simplified.edata["count"], torch.tensor([3, 1]))
+
+
 def test_graph_adjacency_query_bridges_call_ops_layer():
     graph = Graph.homo(
         edge_index=torch.tensor([[0, 0, 1, 1], [1, 1, 2, 2]]),

@@ -33,6 +33,7 @@ from vgl.ops.structure import add_self_loops as add_self_loops
 from vgl.ops.structure import remove_self_loops as remove_self_loops
 from vgl.ops.structure import reverse as reverse
 from vgl.ops.structure import to_bidirected as to_bidirected
+from vgl.ops.structure import to_simple as to_simple
 from vgl.ops.subgraph import edge_subgraph as edge_subgraph
 from vgl.ops.subgraph import in_subgraph as in_subgraph
 from vgl.ops.subgraph import node_subgraph as node_subgraph
@@ -44,6 +45,7 @@ __all__ = [
     "add_self_loops",
     "remove_self_loops",
     "to_bidirected",
+    "to_simple",
     "reverse",
     "line_graph",
     "metapath_reachable_graph",

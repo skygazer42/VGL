@@ -1,7 +1,7 @@
 import torch
 
 from vgl import Graph
-from vgl.ops import add_self_loops, remove_self_loops, to_bidirected
+from vgl.ops import add_self_loops, remove_self_loops, to_bidirected, to_simple
 
 
 def _edge_pairs(graph):
@@ -39,3 +39,53 @@ def test_to_bidirected_adds_missing_reverse_edges():
     updated = to_bidirected(graph)
 
     assert _edge_pairs(updated) == {(0, 1), (1, 0), (1, 2), (2, 1)}
+
+
+def test_to_simple_collapses_parallel_edges_in_stable_order_and_tracks_counts():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 0, 1, 0], [1, 1, 2, 1]]),
+        x=torch.randn(3, 2),
+        edge_data={
+            "weight": torch.tensor([1.0, 2.0, 3.0, 4.0]),
+            "e_id": torch.tensor([10, 11, 12, 13]),
+        },
+    )
+
+    simplified = to_simple(graph, count_attr="count")
+
+    assert torch.equal(simplified.edge_index, torch.tensor([[0, 1], [1, 2]]))
+    assert torch.equal(simplified.edata["weight"], torch.tensor([1.0, 3.0]))
+    assert torch.equal(simplified.edata["count"], torch.tensor([3, 1]))
+    assert "e_id" not in simplified.edata
+
+
+def test_to_simple_updates_only_selected_heterogeneous_relation():
+    writes = ("author", "writes", "paper")
+    cites = ("paper", "cites", "paper")
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.tensor([[10.0], [20.0]])},
+            "paper": {"x": torch.tensor([[1.0], [2.0], [3.0]])},
+        },
+        edges={
+            writes: {
+                "edge_index": torch.tensor([[0, 0, 1], [1, 1, 2]]),
+                "weight": torch.tensor([1.0, 2.0, 3.0]),
+                "e_id": torch.tensor([20, 21, 22]),
+            },
+            cites: {
+                "edge_index": torch.tensor([[0, 1], [2, 0]]),
+                "score": torch.tensor([5.0, 6.0]),
+            },
+        },
+    )
+
+    simplified = to_simple(graph, edge_type=writes, count_attr="multiplicity")
+
+    assert set(simplified.edges) == {writes, cites}
+    assert torch.equal(simplified.edges[writes].edge_index, torch.tensor([[0, 1], [1, 2]]))
+    assert torch.equal(simplified.edges[writes].data["weight"], torch.tensor([1.0, 3.0]))
+    assert torch.equal(simplified.edges[writes].data["multiplicity"], torch.tensor([2, 1]))
+    assert "e_id" not in simplified.edges[writes].data
+    assert torch.equal(simplified.edges[cites].edge_index, graph.edges[cites].edge_index)
+    assert torch.equal(simplified.edges[cites].data["score"], graph.edges[cites].data["score"])

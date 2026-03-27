@@ -329,6 +329,11 @@ class Graph:
 
         return to_bidirected(self, edge_type=edge_type)
 
+    def to_simple(self, *, edge_type=None, count_attr=None):
+        from vgl.ops import to_simple
+
+        return to_simple(self, edge_type=edge_type, count_attr=count_attr)
+
     def line_graph(self, *, edge_type=None, backtracking: bool = True, copy_edata: bool = True):
         from vgl.ops import line_graph
 

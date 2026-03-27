@@ -48,6 +48,33 @@ def _preserved_time_attr(graph: Graph, node_features: dict[str, tuple[str, ...]]
     return None
 
 
+def _graph_with_updated_edges(graph: Graph, edge_updates: dict[tuple[str, str, str], EdgeStore]) -> Graph:
+    edges = dict(graph.edges)
+    edges.update(edge_updates)
+    node_features = {
+        node_type: tuple(graph.nodes[node_type].data.keys())
+        for node_type in graph.schema.node_types
+    }
+    edge_features = {
+        edge_type: tuple(edges[edge_type].data.keys())
+        for edge_type in graph.schema.edge_types
+    }
+    schema = GraphSchema(
+        node_types=graph.schema.node_types,
+        edge_types=graph.schema.edge_types,
+        node_features=node_features,
+        edge_features=edge_features,
+        time_attr=_preserved_time_attr(graph, node_features, edge_features),
+    )
+    return Graph(
+        schema=schema,
+        nodes=dict(graph.nodes),
+        edges=edges,
+        feature_store=graph.feature_store,
+        graph_store=graph.graph_store,
+    )
+
+
 def add_self_loops(graph: Graph, *, edge_type=None) -> Graph:
     edge_type = _resolve_edge_type(graph, edge_type)
     src_type, _, dst_type = edge_type
@@ -97,6 +124,43 @@ def to_bidirected(graph: Graph, *, edge_type=None) -> Graph:
     edges = dict(graph.edges)
     edges[edge_type] = _edge_store_with_index(store, updated_index)
     return Graph(schema=graph.schema, nodes=graph.nodes, edges=edges)
+
+
+def to_simple(graph: Graph, *, edge_type=None, count_attr=None) -> Graph:
+    edge_type = _resolve_edge_type(graph, edge_type)
+    store = graph.edges[edge_type]
+    edge_index = store.edge_index
+    device = edge_index.device
+
+    representative_positions: list[int] = []
+    pair_to_position: dict[tuple[int, int], int] = {}
+    counts: list[int] = []
+    for index, (src, dst) in enumerate(edge_index.t().tolist()):
+        pair = (int(src), int(dst))
+        output_index = pair_to_position.get(pair)
+        if output_index is None:
+            pair_to_position[pair] = len(representative_positions)
+            representative_positions.append(index)
+            counts.append(1)
+            continue
+        counts[output_index] += 1
+
+    representative_tensor = torch.tensor(representative_positions, dtype=torch.long, device=device)
+    simple_edge_index = edge_index[:, representative_tensor] if representative_tensor.numel() > 0 else edge_index[:, :0]
+
+    edge_count = int(edge_index.size(1))
+    edge_data = {"edge_index": simple_edge_index}
+    for key, value in store.data.items():
+        if key in {"edge_index", "e_id"}:
+            continue
+        if isinstance(value, torch.Tensor) and value.ndim > 0 and value.size(0) == edge_count:
+            edge_data[key] = value[representative_tensor]
+        else:
+            edge_data[key] = value
+    if count_attr is not None:
+        edge_data[str(count_attr)] = torch.tensor(counts, dtype=torch.long, device=device)
+
+    return _graph_with_updated_edges(graph, {edge_type: EdgeStore(edge_type, edge_data)})
 
 
 def reverse(graph: Graph, *, copy_ndata: bool = True, copy_edata: bool = False) -> Graph:

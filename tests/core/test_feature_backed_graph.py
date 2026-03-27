@@ -361,6 +361,31 @@ def test_featureless_storage_backed_reverse_preserves_node_count():
     assert torch.equal(reversed_graph.edata["e_id"], torch.tensor([0, 1]))
 
 
+def test_featureless_storage_backed_to_simple_preserves_declared_node_space():
+    schema = GraphSchema(
+        node_types=("node",),
+        edge_types=(HOMO_EDGE,),
+        node_features={"node": ()},
+        edge_features={HOMO_EDGE: ("edge_index",)},
+    )
+    graph_store = InMemoryGraphStore(
+        {HOMO_EDGE: torch.tensor([[0, 0, 1], [1, 1, 0]])},
+        num_nodes={"node": 4},
+    )
+    graph = Graph.from_storage(
+        schema=schema,
+        feature_store=FeatureStore({}),
+        graph_store=graph_store,
+    )
+
+    simplified = graph.to_simple(count_attr="count")
+
+    assert simplified.graph_store is graph_store
+    assert simplified.adjacency().shape == (4, 4)
+    assert torch.equal(simplified.edge_index, torch.tensor([[0, 1], [1, 0]]))
+    assert torch.equal(simplified.edata["count"], torch.tensor([2, 1]))
+
+
 def test_featureless_storage_backed_adjacency_queries_preserve_declared_node_space():
     schema = GraphSchema(
         node_types=("node",),
