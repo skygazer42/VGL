@@ -115,8 +115,8 @@ def test_release_readme_documents_public_install_paths():
     quickstart = (REPO_ROOT / "docs" / "quickstart.md").read_text(encoding="utf-8")
     releasing = (REPO_ROOT / "docs" / "releasing.md").read_text(encoding="utf-8")
 
-    assert "version-0.1.4" in readme
-    assert "Version 0.1.4" in readme
+    assert "version-0.1.5" in readme
+    assert "Version 0.1.5" in readme
     assert 'pip install sky-vgl' in readme
     assert 'pip install "sky-vgl[full]"' in readme
     assert 'pip install "sky-vgl[networkx]"' in readme
