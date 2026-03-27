@@ -27,7 +27,7 @@ def test_networkx_adapter_error_suggests_install_extra(monkeypatch):
 
     monkeypatch.setattr(importlib, "import_module", _block_import_module("networkx"))
 
-    with pytest.raises(ImportError, match='pip install "vgl\\[networkx\\]"'):
+    with pytest.raises(ImportError, match='pip install "sky-vgl\\[networkx\\]"'):
         graph.to_networkx()
 
 
@@ -39,7 +39,7 @@ def test_pyg_adapter_error_suggests_install_extra(monkeypatch):
 
     monkeypatch.setattr(importlib, "import_module", _block_import_module("torch_geometric"))
 
-    with pytest.raises(ImportError, match='pip install "vgl\\[pyg\\]"'):
+    with pytest.raises(ImportError, match='pip install "sky-vgl\\[pyg\\]"'):
         to_pyg(graph)
 
 
@@ -51,12 +51,12 @@ def test_dgl_adapter_error_suggests_install_extra(monkeypatch):
 
     monkeypatch.setattr(importlib, "import_module", _block_import_module("dgl"))
 
-    with pytest.raises(ImportError, match='pip install "vgl\\[dgl\\]"'):
+    with pytest.raises(ImportError, match='pip install "sky-vgl\\[dgl\\]"'):
         graph.to_dgl()
 
 
 def test_tensorboard_logger_error_suggests_install_extra(monkeypatch):
     monkeypatch.setattr(importlib, "import_module", _block_import_module("torch.utils.tensorboard"))
 
-    with pytest.raises(ImportError, match='pip install "vgl\\[tensorboard\\]"'):
+    with pytest.raises(ImportError, match='pip install "sky-vgl\\[tensorboard\\]"'):
         _tensorboard_summary_writer_class()

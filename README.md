@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-%E2%89%A53.10-blue?style=flat-square&logo=python&logoColor=white" alt="Python 3.10+"/></a>
   <a href="https://pytorch.org/"><img src="https://img.shields.io/badge/PyTorch-%E2%89%A52.4-ee4c2c?style=flat-square&logo=pytorch&logoColor=white" alt="PyTorch 2.4+"/></a>
-  <img src="https://img.shields.io/badge/version-0.1.1-8b5cf6?style=flat-square" alt="Version 0.1.1"/>
+  <img src="https://img.shields.io/badge/version-0.1.2-8b5cf6?style=flat-square" alt="Version 0.1.2"/>
   <img src="https://img.shields.io/badge/license-see%20LICENSE-green?style=flat-square" alt="License"/>
 </p>
 
@@ -361,18 +361,18 @@ For typed heterogeneous temporal graphs, pass `edge_type=` on each `TemporalEven
 ### From PyPI
 
 ```bash
-pip install vgl
+pip install sky-vgl
 ```
 
 ### Optional Extras
 
 ```bash
-pip install "vgl[scipy]"
-pip install "vgl[networkx]"
-pip install "vgl[tensorboard]"
-pip install "vgl[dgl]"
-pip install "vgl[pyg]"
-pip install "vgl[full]"
+pip install "sky-vgl[scipy]"
+pip install "sky-vgl[networkx]"
+pip install "sky-vgl[tensorboard]"
+pip install "sky-vgl[dgl]"
+pip install "sky-vgl[pyg]"
+pip install "sky-vgl[full]"
 ```
 
 Use extras when you need optional sparse export, interoperability, or logging integrations.

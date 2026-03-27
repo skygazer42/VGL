@@ -38,7 +38,7 @@ def test_release_metadata_exposes_public_package_information(built_release_artif
     wheel_path, _ = built_release_artifacts
     metadata = _wheel_metadata(wheel_path)
 
-    assert metadata["Name"] == "vgl"
+    assert metadata["Name"] == "sky-vgl"
     assert metadata["Requires-Python"] == ">=3.10"
     assert metadata["Author-email"]
     assert metadata["Keywords"]
@@ -100,9 +100,15 @@ def test_release_workflows_exist_for_ci_and_pypi_publish():
 
 def test_release_readme_documents_public_install_paths():
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    quickstart = (REPO_ROOT / "docs" / "quickstart.md").read_text(encoding="utf-8")
+    releasing = (REPO_ROOT / "docs" / "releasing.md").read_text(encoding="utf-8")
 
-    assert 'pip install vgl' in readme
-    assert 'pip install "vgl[full]"' in readme
-    assert 'pip install "vgl[networkx]"' in readme
-    assert 'pip install "vgl[pyg]"' in readme
-    assert 'pip install "vgl[dgl]"' in readme
+    assert 'pip install sky-vgl' in readme
+    assert 'pip install "sky-vgl[full]"' in readme
+    assert 'pip install "sky-vgl[networkx]"' in readme
+    assert 'pip install "sky-vgl[pyg]"' in readme
+    assert 'pip install "sky-vgl[dgl]"' in readme
+    assert "pip install sky-vgl" in quickstart
+    assert 'pip install "sky-vgl[full]"' in quickstart
+    assert "sky-vgl project name" in releasing
+    assert "sky-vgl` works in a clean environment" in releasing

@@ -3,7 +3,7 @@
 ## Pre-release checklist
 
 1. Confirm the intended public version in `vgl/version.py`.
-2. Re-check that the `vgl` project name is still available or that you control the existing PyPI project.
+2. Re-check that the sky-vgl project name is still available or that you control the existing PyPI project.
 3. Run the full local verification suite:
 
 ```bash
@@ -29,7 +29,7 @@ Use the GitHub `publish` workflow in manual mode to publish to TestPyPI first.
 After upload, verify:
 
 - the project page renders correctly
-- `pip install --index-url https://test.pypi.org/simple/ vgl` works in a clean environment
+- `pip install --index-url https://test.pypi.org/simple/ sky-vgl` works in a clean environment
 - the documented extras install correctly
 
 ## PyPI
@@ -42,3 +42,5 @@ Create a GitHub release after TestPyPI verification passes. The release workflow
 2. Import `vgl`, `Graph`, and `Trainer`.
 3. Verify the PyPI project page links for Homepage, Repository, Documentation, and Issues.
 4. Check that the tagged source and published package versions match.
+
+The published distribution name is `sky-vgl`, but the Python import surface remains `vgl`.

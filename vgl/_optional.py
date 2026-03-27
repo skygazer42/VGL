@@ -1,5 +1,7 @@
 import importlib
 
+_DIST_NAME = "sky-vgl"
+
 
 def import_optional(
     module_name: str,
@@ -14,5 +16,5 @@ def import_optional(
         install_name = package_name or module_name
         raise ImportError(
             f"{feature_name} requires the optional {install_name!r} dependency. "
-            f'Install it with `pip install "vgl[{extra_name}]"`.'
+            f'Install it with `pip install "{_DIST_NAME}[{extra_name}]"`.'
         ) from exc

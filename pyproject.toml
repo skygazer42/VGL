@@ -3,7 +3,7 @@ requires = ["hatchling>=1.26.0"]
 build-backend = "hatchling.build"
 
 [project]
-name = "vgl"
+name = "sky-vgl"
 dynamic = ["version"]
 description = "Unified graph learning framework with PyTorch"
 readme = "README.md"
