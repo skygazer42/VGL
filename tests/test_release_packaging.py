@@ -100,6 +100,10 @@ def test_release_workflows_exist_for_ci_and_pypi_publish():
     assert "id-token: write" in publish_text
     assert "PYPI_API_TOKEN" in publish_text
     assert "TEST_PYPI_API_TOKEN" in publish_text
+    assert "probe-publish-auth:" in publish_text
+    assert "needs.probe-publish-auth.outputs.has_pypi_api_token" in publish_text
+    assert "needs.probe-publish-auth.outputs.has_test_pypi_api_token" in publish_text
+    assert "GITHUB_OUTPUT" in publish_text
     assert "Publish to PyPI with API token" in publish_text
     assert "Publish to PyPI with Trusted Publishing" in publish_text
     assert "Publish to TestPyPI with API token" in publish_text
