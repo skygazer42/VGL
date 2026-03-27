@@ -127,11 +127,27 @@ def write_partitioned_graph(graph: Graph, root, *, num_partitions: int) -> Parti
         shard_graph, node_ids_by_type, boundary_edges = _partition_subgraph(graph, node_ranges)
         filename = f"part-{partition_id}.pt"
         payload_node_ids = node_ids_by_type["node"] if single_node_type else node_ids_by_type
+        node_feature_shapes = {
+            str(node_type): {
+                name: tuple(int(dim) for dim in value.shape)
+                for name, value in shard_graph.nodes[str(node_type)].data.items()
+                if isinstance(value, torch.Tensor)
+            }
+            for node_type in shard_graph.nodes
+        }
         edge_ids_by_type = {
             tuple(edge_type): tuple(
                 int(edge_id)
                 for edge_id in torch.as_tensor(shard_graph.edges[tuple(edge_type)].data["e_id"], dtype=torch.long).tolist()
             )
+            for edge_type in shard_graph.edges
+        }
+        edge_feature_shapes = {
+            tuple(edge_type): {
+                name: tuple(int(dim) for dim in value.shape)
+                for name, value in shard_graph.edges[tuple(edge_type)].data.items()
+                if name != "edge_index" and isinstance(value, torch.Tensor)
+            }
             for edge_type in shard_graph.edges
         }
         boundary_edge_ids_by_type = {
@@ -157,6 +173,8 @@ def write_partitioned_graph(graph: Graph, root, *, num_partitions: int) -> Parti
                 node_ranges=node_ranges,
                 path=filename,
                 metadata={
+                    "node_feature_shapes": node_feature_shapes,
+                    "edge_feature_shapes": edge_feature_shapes,
                     "edge_ids_by_type": edge_ids_by_type,
                     "boundary_edge_ids_by_type": boundary_edge_ids_by_type,
                 },

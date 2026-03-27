@@ -277,9 +277,10 @@ class _PartitionStoreBundleCache:
 
 
 class _LazyPartitionFeatureStoreAdapter:
-    def __init__(self, cache: _PartitionStoreBundleCache, partition_id: int):
+    def __init__(self, cache: _PartitionStoreBundleCache, partition: PartitionShard):
         self._cache = cache
-        self._partition_id = int(partition_id)
+        self._partition = partition
+        self._partition_id = int(partition.partition_id)
 
     @property
     def _store(self) -> LocalFeatureStoreAdapter:
@@ -313,6 +314,10 @@ class _LazyPartitionFeatureStoreAdapter:
         *,
         partition_id: int | None = None,
     ) -> tuple[int, ...]:
+        try:
+            return self._partition.feature_shape(key)
+        except KeyError:
+            pass
         return self._store.shape(key, partition_id=self._partition_id if partition_id is None else partition_id)
 
 
@@ -662,7 +667,7 @@ def load_partitioned_stores(root) -> tuple[PartitionManifest, PartitionedFeature
     feature_stores = {}
     graph_stores = {}
     for partition in manifest.partitions:
-        feature_stores[partition.partition_id] = _LazyPartitionFeatureStoreAdapter(cache, partition.partition_id)
+        feature_stores[partition.partition_id] = _LazyPartitionFeatureStoreAdapter(cache, partition)
         graph_stores[partition.partition_id] = _LazyPartitionGraphStoreAdapter(cache, partition)
     return manifest, PartitionedFeatureStore(feature_stores), PartitionedGraphStore(graph_stores)
 

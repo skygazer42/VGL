@@ -154,6 +154,9 @@ def test_load_partitioned_stores_lazily_loads_and_reuses_partition_payloads(monk
     _, feature_store, graph_store = load_partitioned_stores(tmp_path)
 
     assert load_calls == []
+    assert feature_store.shape(NODE_KEY, partition_id=1) == (2, 2)
+    assert feature_store.shape(weight_key, partition_id=0) == (1,)
+    assert load_calls == []
     assert graph_store.edge_types == (edge_type,)
     assert graph_store.num_nodes(partition_id=1) == 2
     assert load_calls == []

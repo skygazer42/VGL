@@ -112,3 +112,41 @@ def test_partition_manifest_round_trips_edge_id_metadata(tmp_path):
     assert loaded.partitions[0].metadata["boundary_edge_ids_by_type"][writes] == (4,)
     assert loaded.partitions[1].metadata["edge_ids_by_type"][writes] == (2, 3)
     assert loaded.partitions[1].metadata["boundary_edge_ids_by_type"][writes] == (4,)
+
+
+def test_partition_manifest_round_trips_feature_shape_metadata(tmp_path):
+    writes = ("author", "writes", "paper")
+    manifest = PartitionManifest(
+        num_nodes=9,
+        num_nodes_by_type={"author": 4, "paper": 5},
+        partitions=(
+            PartitionShard(
+                partition_id=0,
+                node_range=(0, 2),
+                node_ranges={"author": (0, 2), "paper": (0, 3)},
+                path="part-0.pt",
+                metadata={
+                    "node_feature_shapes": {
+                        "author": {
+                            "x": [2, 8],
+                            "n_id": [2],
+                        },
+                    },
+                    "edge_feature_shapes": {
+                        writes: {
+                            "weight": [2],
+                            "e_id": [2],
+                        },
+                    },
+                },
+            ),
+        ),
+    )
+
+    save_partition_manifest(tmp_path / "manifest.json", manifest)
+    loaded = load_partition_manifest(tmp_path / "manifest.json")
+
+    assert loaded.partitions[0].metadata["node_feature_shapes"]["author"]["x"] == (2, 8)
+    assert loaded.partitions[0].metadata["node_feature_shapes"]["author"]["n_id"] == (2,)
+    assert loaded.partitions[0].metadata["edge_feature_shapes"][writes]["weight"] == (2,)
+    assert loaded.partitions[0].metadata["edge_feature_shapes"][writes]["e_id"] == (2,)

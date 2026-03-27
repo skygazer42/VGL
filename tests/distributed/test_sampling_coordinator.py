@@ -152,6 +152,11 @@ def test_store_backed_sampling_coordinator_from_partition_dir_is_lazy_until_stor
     assert len(routes) == 2
     assert load_calls == []
 
+    empty = coordinator.fetch_node_features(NODE_KEY, torch.empty((0,), dtype=torch.long))
+    assert torch.equal(empty.index, torch.empty((0,), dtype=torch.long))
+    assert empty.values.shape == (0, 2)
+    assert load_calls == []
+
     fetched = coordinator.fetch_node_features(NODE_KEY, torch.tensor([3, 2]))
     assert torch.equal(fetched.values, torch.tensor([[6.0, 7.0], [4.0, 5.0]]))
     assert len(load_calls) == 1

@@ -32,6 +32,32 @@ def _normalize_edge_id_metadata(raw_value) -> dict[tuple[str, str, str], tuple[i
     }
 
 
+def _normalize_shape(shape) -> tuple[int, ...]:
+    return tuple(int(dim) for dim in shape)
+
+
+def _normalize_node_feature_shape_metadata(raw_value) -> dict[str, dict[str, tuple[int, ...]]]:
+    raw_value = dict(raw_value)
+    return {
+        str(node_type): {
+            str(feature_name): _normalize_shape(shape)
+            for feature_name, shape in dict(feature_shapes).items()
+        }
+        for node_type, feature_shapes in raw_value.items()
+    }
+
+
+def _normalize_edge_feature_shape_metadata(raw_value) -> dict[tuple[str, str, str], dict[str, tuple[int, ...]]]:
+    raw_value = dict(raw_value)
+    return {
+        _normalize_edge_type(edge_type): {
+            str(feature_name): _normalize_shape(shape)
+            for feature_name, shape in dict(feature_shapes).items()
+        }
+        for edge_type, feature_shapes in raw_value.items()
+    }
+
+
 def _normalize_partition_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(metadata)
     for key in _EDGE_ID_METADATA_KEYS:
@@ -39,6 +65,12 @@ def _normalize_partition_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
         if raw_value is None:
             continue
         normalized[key] = _normalize_edge_id_metadata(raw_value)
+    raw_node_feature_shapes = normalized.get("node_feature_shapes")
+    if raw_node_feature_shapes is not None:
+        normalized["node_feature_shapes"] = _normalize_node_feature_shape_metadata(raw_node_feature_shapes)
+    raw_edge_feature_shapes = normalized.get("edge_feature_shapes")
+    if raw_edge_feature_shapes is not None:
+        normalized["edge_feature_shapes"] = _normalize_edge_feature_shape_metadata(raw_edge_feature_shapes)
     return normalized
 
 
@@ -51,6 +83,24 @@ def _serialize_partition_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
         serialized[key] = {
             json.dumps(list(edge_type)): list(edge_ids)
             for edge_type, edge_ids in dict(raw_value).items()
+        }
+    raw_node_feature_shapes = serialized.get("node_feature_shapes")
+    if raw_node_feature_shapes is not None:
+        serialized["node_feature_shapes"] = {
+            str(node_type): {
+                str(feature_name): list(shape)
+                for feature_name, shape in dict(feature_shapes).items()
+            }
+            for node_type, feature_shapes in dict(raw_node_feature_shapes).items()
+        }
+    raw_edge_feature_shapes = serialized.get("edge_feature_shapes")
+    if raw_edge_feature_shapes is not None:
+        serialized["edge_feature_shapes"] = {
+            json.dumps(list(edge_type)): {
+                str(feature_name): list(shape)
+                for feature_name, shape in dict(feature_shapes).items()
+            }
+            for edge_type, feature_shapes in dict(raw_edge_feature_shapes).items()
         }
     return serialized
 
@@ -99,6 +149,35 @@ class PartitionShard:
     @property
     def boundary_edge_ids_by_type(self) -> dict[tuple[str, str, str], tuple[int, ...]]:
         return dict(self.metadata.get("boundary_edge_ids_by_type", {}))
+
+    @property
+    def node_feature_shapes(self) -> dict[str, dict[str, tuple[int, ...]]]:
+        return {
+            str(node_type): dict(feature_shapes)
+            for node_type, feature_shapes in self.metadata.get("node_feature_shapes", {}).items()
+        }
+
+    @property
+    def edge_feature_shapes(self) -> dict[tuple[str, str, str], dict[str, tuple[int, ...]]]:
+        return {
+            tuple(edge_type): dict(feature_shapes)
+            for edge_type, feature_shapes in self.metadata.get("edge_feature_shapes", {}).items()
+        }
+
+    def feature_shape(self, key) -> tuple[int, ...]:
+        entity_kind, type_key, feature_name = key
+        feature_name = str(feature_name)
+        if entity_kind == "node":
+            try:
+                return self.node_feature_shapes[str(type_key)][feature_name]
+            except KeyError as exc:
+                raise KeyError(key) from exc
+        if entity_kind == "edge":
+            try:
+                return self.edge_feature_shapes[tuple(type_key)][feature_name]
+            except KeyError as exc:
+                raise KeyError(key) from exc
+        raise KeyError(key)
 
     def owns(self, node_id: int, *, node_type: str = "node") -> bool:
         start, end = self.node_range_for(node_type)
