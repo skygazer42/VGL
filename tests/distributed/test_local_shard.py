@@ -1,6 +1,7 @@
 import torch
 
 from vgl import Graph
+import vgl.distributed.shard as distributed_shard_module
 from vgl.distributed.shard import LocalGraphShard
 from vgl.distributed.writer import write_partitioned_graph
 
@@ -22,6 +23,50 @@ def test_local_graph_shard_loads_partition_graph_and_store_view(tmp_path):
     assert torch.equal(shard.graph.n_id, torch.tensor([2, 3]))
     assert torch.equal(shard.graph_store.edge_index(), torch.tensor([[0], [1]]))
     assert torch.equal(fetched, torch.tensor([[4.0, 5.0], [6.0, 7.0]]))
+
+
+def test_local_graph_shard_from_partition_dir_is_lazy_until_data_access(monkeypatch, tmp_path):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]]),
+        x=torch.arange(8, dtype=torch.float32).view(4, 2),
+        edge_data={"weight": torch.tensor([1.0, 2.0, 3.0, 4.0])},
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+
+    load_calls = []
+    real_torch_load = distributed_shard_module.torch.load
+
+    def counting_load(path, *args, **kwargs):
+        load_calls.append(str(path))
+        return real_torch_load(path, *args, **kwargs)
+
+    monkeypatch.setattr(distributed_shard_module.torch, "load", counting_load)
+
+    shard = LocalGraphShard.from_partition_dir(tmp_path, partition_id=0)
+
+    assert load_calls == []
+    assert shard.partition.partition_id == 0
+    assert torch.equal(shard.node_ids, torch.tensor([0, 1]))
+    assert torch.equal(shard.global_to_local(torch.tensor([0, 1])), torch.tensor([0, 1]))
+    assert torch.equal(shard.local_to_global(torch.tensor([0, 1])), torch.tensor([0, 1]))
+    assert torch.equal(shard.edge_ids(), torch.tensor([0]))
+    assert torch.equal(shard.boundary_edge_ids(), torch.tensor([1, 3]))
+    assert torch.equal(shard.incident_edge_ids(), torch.tensor([0, 1, 3]))
+    assert torch.equal(shard.local_to_global_edge(torch.tensor([0])), torch.tensor([0]))
+    assert torch.equal(shard.global_to_local_edge(torch.tensor([0])), torch.tensor([0]))
+    assert load_calls == []
+
+    fetched = shard.feature_store.fetch(("node", "node", "x"), torch.tensor([0, 1])).values
+
+    assert torch.equal(fetched, torch.tensor([[0.0, 1.0], [2.0, 3.0]]))
+    assert len(load_calls) == 1
+    assert load_calls[0].endswith("part-0.pt")
+
+    assert torch.equal(shard.graph.edge_index, torch.tensor([[0], [1]]))
+    assert torch.equal(shard.graph.edata["weight"], torch.tensor([1.0]))
+    assert torch.equal(shard.graph_store.edge_index(), torch.tensor([[0], [1]]))
+    assert torch.equal(shard.boundary_edge_index(), torch.tensor([[1, 3], [2, 0]]))
+    assert len(load_calls) == 1
 
 
 def test_local_graph_shard_maps_local_ids_and_edges_back_to_global_space(tmp_path):
@@ -60,6 +105,40 @@ def test_local_graph_shard_loads_temporal_partition_graph(tmp_path):
     assert torch.equal(shard.local_to_global(torch.tensor([0, 1])), torch.tensor([2, 3]))
 
 
+def test_local_graph_shard_preserves_temporal_metadata_without_eager_payload_load(monkeypatch, tmp_path):
+    graph = Graph.temporal(
+        nodes={"node": {"x": torch.arange(8, dtype=torch.float32).view(4, 2)}},
+        edges={
+            ("node", "to", "node"): {
+                "edge_index": torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]]),
+                "timestamp": torch.tensor([3, 5, 7, 11]),
+            }
+        },
+        time_attr="timestamp",
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+
+    load_calls = []
+    real_torch_load = distributed_shard_module.torch.load
+
+    def counting_load(path, *args, **kwargs):
+        load_calls.append(str(path))
+        return real_torch_load(path, *args, **kwargs)
+
+    monkeypatch.setattr(distributed_shard_module.torch, "load", counting_load)
+
+    shard = LocalGraphShard.from_partition_dir(tmp_path, partition_id=1)
+
+    assert load_calls == []
+    assert shard.graph.schema.time_attr == "timestamp"
+    assert torch.equal(shard.node_ids, torch.tensor([2, 3]))
+    assert load_calls == []
+
+    assert torch.equal(shard.graph.edata["timestamp"], torch.tensor([7]))
+    assert len(load_calls) == 1
+    assert load_calls[0].endswith("part-1.pt")
+
+
 def test_local_graph_shard_reconstructs_multi_relation_partition_graph_edge_ids(tmp_path):
     follows = ("node", "follows", "node")
     likes = ("node", "likes", "node")
@@ -90,6 +169,37 @@ def test_local_graph_shard_reconstructs_multi_relation_partition_graph_edge_ids(
     assert torch.equal(shard.edge_ids(edge_type=follows), torch.tensor([2, 3]))
     assert torch.equal(shard.global_to_local_edge(torch.tensor([3, 2]), edge_type=follows), torch.tensor([1, 0]))
     assert torch.equal(shard.local_to_global_edge(torch.tensor([0, 1]), edge_type=follows), torch.tensor([2, 3]))
+
+
+def test_local_graph_shard_preserves_manifest_edge_type_order(tmp_path):
+    writes = ("author", "writes", "paper")
+    written_by = ("paper", "written_by", "author")
+    cites = ("paper", "cites", "paper")
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.arange(4, dtype=torch.float32).view(2, 2)},
+            "paper": {"x": torch.arange(8, 20, dtype=torch.float32).view(6, 2)},
+        },
+        edges={
+            writes: {
+                "edge_index": torch.tensor([[0, 1], [1, 2]]),
+                "weight": torch.tensor([1.0, 2.0]),
+            },
+            written_by: {
+                "edge_index": torch.tensor([[1, 2], [0, 1]]),
+                "weight": torch.tensor([3.0, 4.0]),
+            },
+            cites: {
+                "edge_index": torch.tensor([[0, 2], [2, 3]]),
+                "weight": torch.tensor([5.0, 6.0]),
+            },
+        },
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=1)
+
+    shard = LocalGraphShard.from_partition_dir(tmp_path, partition_id=0)
+
+    assert tuple(shard.graph.edges) == (writes, written_by, cites)
 
 
 def test_local_graph_shard_reconstructs_heterogeneous_partition_graph_edge_ids(tmp_path):

@@ -185,7 +185,11 @@ def write_partitioned_graph(graph: Graph, root, *, num_partitions: int) -> Parti
         num_nodes=sum(num_nodes_by_type.values()),
         num_nodes_by_type=num_nodes_by_type,
         partitions=tuple(partitions),
-        metadata={"num_edges": sum(int(store.edge_index.size(1)) for store in graph.edges.values())},
+        metadata={
+            "num_edges": sum(int(store.edge_index.size(1)) for store in graph.edges.values()),
+            "edge_types": tuple(tuple(edge_type) for edge_type in graph.edges),
+            "time_attr": graph.schema.time_attr,
+        },
     )
     save_partition_manifest(root / "manifest.json", manifest)
     return manifest

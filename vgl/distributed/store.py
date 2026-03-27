@@ -246,6 +246,7 @@ def _partition_edge_types(partition: PartitionShard) -> tuple[EdgeType, ...]:
 class _PartitionStoreBundle:
     feature_store: LocalFeatureStoreAdapter
     graph_store: LocalGraphStoreAdapter
+    boundary_edge_data_by_type: dict[EdgeType, dict]
 
 
 class _PartitionStoreBundleCache:
@@ -268,10 +269,7 @@ class _PartitionStoreBundleCache:
 
         partition = self._partition(partition_id)
         payload = _partition_payload(self._root, partition)
-        bundle = _PartitionStoreBundle(
-            feature_store=_feature_store_adapter_from_payload(payload),
-            graph_store=_graph_store_adapter_from_payload(payload, partition),
-        )
+        bundle = _partition_store_bundle_from_payload(payload, partition)
         self._bundles[partition_id] = bundle
         return bundle
 
@@ -599,6 +597,16 @@ def _boundary_edge_data_by_type(payload: dict, edge_types) -> dict[EdgeType, dic
 
 
 def _feature_store_adapter_from_payload(payload: dict) -> LocalFeatureStoreAdapter:
+    return _partition_feature_store_bundle(payload).feature_store
+
+
+@dataclass(slots=True)
+class _PartitionFeatureStoreBundle:
+    feature_store: LocalFeatureStoreAdapter
+    boundary_edge_data_by_type: dict[EdgeType, dict]
+
+
+def _partition_feature_store_bundle(payload: dict) -> _PartitionFeatureStoreBundle:
     graph_payload = payload["graph"]
     node_payloads = {
         str(node_type): dict(node_data)
@@ -625,19 +633,28 @@ def _feature_store_adapter_from_payload(payload: dict) -> LocalFeatureStoreAdapt
             },
         }
     )
-    return LocalFeatureStoreAdapter(
-        feature_store,
-        boundary_edge_data_by_type=_boundary_edge_data_by_type(payload, edge_types),
+    boundary_edge_data_by_type = _boundary_edge_data_by_type(payload, edge_types)
+    return _PartitionFeatureStoreBundle(
+        feature_store=LocalFeatureStoreAdapter(
+            feature_store,
+            boundary_edge_data_by_type=boundary_edge_data_by_type,
+        ),
+        boundary_edge_data_by_type=boundary_edge_data_by_type,
     )
 
 
 def _graph_store_adapter_from_payload(payload: dict, partition: PartitionShard) -> LocalGraphStoreAdapter:
+    return _partition_store_bundle_from_payload(payload, partition).graph_store
+
+
+def _partition_store_bundle_from_payload(payload: dict, partition: PartitionShard) -> _PartitionStoreBundle:
     graph_payload = payload["graph"]
     edge_payloads = {
         tuple(edge_type): dict(edge_data)
         for edge_type, edge_data in graph_payload["edges"].items()
     }
     node_ids_by_type = _node_ids_by_type(payload, partition)
+    feature_bundle = _partition_feature_store_bundle(payload)
     graph_store = InMemoryGraphStore(
         edges={
             edge_type: torch.as_tensor(edge_payload["edge_index"], dtype=torch.long)
@@ -648,12 +665,17 @@ def _graph_store_adapter_from_payload(payload: dict, partition: PartitionShard) 
             for node_type, node_ids in node_ids_by_type.items()
         },
     )
-    return LocalGraphStoreAdapter(
+    local_graph_store = LocalGraphStoreAdapter(
         graph_store,
         boundary_edge_index_by_type={
             edge_type: boundary_edge_data["edge_index"]
-            for edge_type, boundary_edge_data in _boundary_edge_data_by_type(payload, tuple(edge_payloads)).items()
+            for edge_type, boundary_edge_data in feature_bundle.boundary_edge_data_by_type.items()
         },
+    )
+    return _PartitionStoreBundle(
+        feature_store=feature_bundle.feature_store,
+        graph_store=local_graph_store,
+        boundary_edge_data_by_type=feature_bundle.boundary_edge_data_by_type,
     )
 
 

@@ -236,6 +236,31 @@ class PartitionManifest:
     def num_partitions(self) -> int:
         return len(self.partitions)
 
+    @property
+    def time_attr(self) -> str | None:
+        time_attr = self.metadata.get("time_attr")
+        if time_attr is None:
+            return None
+        return str(time_attr)
+
+    @property
+    def edge_types(self) -> tuple[tuple[str, str, str], ...]:
+        raw_edge_types = self.metadata.get("edge_types")
+        if raw_edge_types is not None:
+            return tuple(_normalize_edge_type(edge_type) for edge_type in raw_edge_types)
+
+        ordered = []
+        seen = set()
+        for partition in self.partitions:
+            for mapping in (partition.edge_ids_by_type, partition.boundary_edge_ids_by_type):
+                for edge_type in mapping:
+                    edge_type = tuple(edge_type)
+                    if edge_type in seen:
+                        continue
+                    seen.add(edge_type)
+                    ordered.append(edge_type)
+        return tuple(ordered)
+
     def owner(self, node_id: int, *, node_type: str = "node") -> PartitionShard:
         node_type = str(node_type)
         node_id = int(node_id)
