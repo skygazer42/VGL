@@ -37,16 +37,18 @@ def built_release_artifacts(tmp_path_factory):
 def test_release_metadata_exposes_public_package_information(built_release_artifacts):
     wheel_path, _ = built_release_artifacts
     metadata = _wheel_metadata(wheel_path)
+    project_urls = metadata.get_all("Project-URL", [])
 
     assert metadata["Name"] == "sky-vgl"
     assert metadata["Requires-Python"] == ">=3.10"
     assert metadata["Author-email"]
     assert metadata["Keywords"]
     assert metadata.get_all("Classifier")
-    assert any(value.startswith("Homepage, ") for value in metadata.get_all("Project-URL", []))
-    assert any(value.startswith("Repository, ") for value in metadata.get_all("Project-URL", []))
-    assert any(value.startswith("Documentation, ") for value in metadata.get_all("Project-URL", []))
-    assert any(value.startswith("Issues, ") for value in metadata.get_all("Project-URL", []))
+    assert "Homepage, https://github.com/skygazer42/sky-vgl" in project_urls
+    assert "Repository, https://github.com/skygazer42/sky-vgl" in project_urls
+    assert "Documentation, https://github.com/skygazer42/sky-vgl#readme" in project_urls
+    assert "Issues, https://github.com/skygazer42/sky-vgl/issues" in project_urls
+    assert "Changelog, https://github.com/skygazer42/sky-vgl/releases" in project_urls
     assert set(metadata.get_all("Provides-Extra", [])) >= {
         "dev",
         "scipy",
@@ -108,6 +110,8 @@ def test_release_readme_documents_public_install_paths():
     assert 'pip install "sky-vgl[networkx]"' in readme
     assert 'pip install "sky-vgl[pyg]"' in readme
     assert 'pip install "sky-vgl[dgl]"' in readme
+    assert "git clone https://github.com/skygazer42/sky-vgl.git" in readme
+    assert "cd sky-vgl" in readme
     assert "pip install sky-vgl" in quickstart
     assert 'pip install "sky-vgl[full]"' in quickstart
     assert "sky-vgl project name" in releasing

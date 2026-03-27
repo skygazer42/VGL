@@ -41,11 +41,11 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/skygazer42/VGL"
-Repository = "https://github.com/skygazer42/VGL"
-Documentation = "https://github.com/skygazer42/VGL#readme"
-Issues = "https://github.com/skygazer42/VGL/issues"
-Changelog = "https://github.com/skygazer42/VGL/releases"
+Homepage = "https://github.com/skygazer42/sky-vgl"
+Repository = "https://github.com/skygazer42/sky-vgl"
+Documentation = "https://github.com/skygazer42/sky-vgl#readme"
+Issues = "https://github.com/skygazer42/sky-vgl/issues"
+Changelog = "https://github.com/skygazer42/sky-vgl/releases"
 
 [project.optional-dependencies]
 dev = [

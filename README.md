@@ -380,8 +380,8 @@ Use extras when you need optional sparse export, interoperability, or logging in
 ### From Source
 
 ```bash
-git clone https://github.com/skygazer42/VGL.git
-cd VGL
+git clone https://github.com/skygazer42/sky-vgl.git
+cd sky-vgl
 pip install -e .
 ```
 
