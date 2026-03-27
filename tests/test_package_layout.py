@@ -356,6 +356,16 @@ def test_compat_package_exposes_networkx_helpers():
     assert callable(getattr(compat_module, "to_networkx", None))
 
 
+def test_compat_package_exposes_edge_list_helpers():
+    import vgl.compat as compat_module
+    from vgl.compat import from_edge_list, to_edge_list
+
+    assert callable(from_edge_list)
+    assert callable(to_edge_list)
+    assert callable(getattr(compat_module, "from_edge_list", None))
+    assert callable(getattr(compat_module, "to_edge_list", None))
+
+
 def test_foundation_packages_expose_in_degrees_and_out_degrees_exports():
     import vgl.ops as ops_module
     from vgl.ops import in_degrees, out_degrees

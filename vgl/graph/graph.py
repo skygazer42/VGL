@@ -167,6 +167,12 @@ class Graph:
 
         return from_networkx(graph)
 
+    @classmethod
+    def from_edge_list(cls, edge_list, *, num_nodes=None, node_data=None, edge_data=None):
+        from vgl.compat.edgelist import from_edge_list
+
+        return from_edge_list(edge_list, num_nodes=num_nodes, node_data=node_data, edge_data=edge_data)
+
     def to_pyg(self):
         from vgl.compat.pyg import to_pyg
 
@@ -181,6 +187,11 @@ class Graph:
         from vgl.compat.networkx import to_networkx
 
         return to_networkx(self)
+
+    def to_edge_list(self):
+        from vgl.compat.edgelist import to_edge_list
+
+        return to_edge_list(self)
 
     def adjacency(self, *, layout="coo", edge_type=None):
         from vgl.sparse import SparseLayout, from_edge_index
