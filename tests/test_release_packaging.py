@@ -98,6 +98,8 @@ def test_release_workflows_exist_for_ci_and_pypi_publish():
     assert "python -m pytest -q" in ci_text
     assert "python -m build" in ci_text
     assert "python -m twine check" in ci_text
+    assert "python scripts/docs_link_scan.py" in ci_text
+    assert "python scripts/release_contract_scan.py --artifact-dir dist" in ci_text
     assert "python scripts/release_smoke.py --artifact-dir dist --kind all" in ci_text
     assert "tags:" in publish_text
     assert "v*" in publish_text
