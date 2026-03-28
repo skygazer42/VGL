@@ -18,6 +18,8 @@ jobs:
         run: python scripts/full_scan.py
       - name: Run docs link scan
         run: python scripts/docs_link_scan.py
+      - name: Run public surface scan
+        run: python scripts/public_surface_scan.py
 
   lint:
     runs-on: ubuntu-latest

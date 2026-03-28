@@ -58,3 +58,4 @@ def test_ci_workflow_runs_the_full_scan_script():
     ci_text = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
 
     assert "python scripts/full_scan.py" in ci_text
+    assert "python scripts/public_surface_scan.py" in ci_text
