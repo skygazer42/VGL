@@ -1,4 +1,3 @@
-import pytest
 import torch
 
 from vgl import Graph, HeteroBlock

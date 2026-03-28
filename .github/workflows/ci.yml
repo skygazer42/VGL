@@ -17,6 +17,36 @@ jobs:
       - name: Run full repository scan
         run: python scripts/full_scan.py
 
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install lint dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      - name: Run Ruff
+        run: python -m ruff check .
+
+  exec-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install execution scan dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev,networkx,scipy,tensorboard]"
+      - name: Run extras smoke scan
+        run: python scripts/extras_smoke.py --extras networkx scipy tensorboard
+      - name: Run dependency audit
+        run: python scripts/dependency_audit.py
+
   test:
     runs-on: ubuntu-latest
     strategy:

@@ -3,7 +3,6 @@ import sys
 import textwrap
 from pathlib import Path
 
-import pytest
 import torch
 
 from vgl import Graph
