@@ -12,10 +12,13 @@ from vgl import (
     CSVLogger,
     CGConv,
     ChebConv,
+    ClusterData,
     ClusterGCNConv,
+    ClusterLoader,
     ConsoleLogger,
     ConfidencePenaltyScheduler,
     ConfidencePenaltyTask,
+    DatasetRegistry,
     DAGNNConv,
     DNAConv,
     EdgeConv,
@@ -45,6 +48,9 @@ from vgl import (
     GeneralizedCrossEntropyTask,
     Graph,
     GraphBatch,
+    GraphSAINTEdgeSampler,
+    GraphSAINTNodeSampler,
+    GraphSAINTRandomWalkSampler,
     GraphConv,
     GraphTransformerEncoder,
     GraphTransformerEncoderLayer,
@@ -61,6 +67,7 @@ from vgl import (
     HGTConv,
     H2GCNConv,
     IdentityTemporalMessage,
+    KarateClubDataset,
     LayerwiseLrDecay,
     LastMessageAggregator,
     LightGCNConv,
@@ -69,6 +76,7 @@ from vgl import (
     MixHopConv,
     LinkPredictionBatch,
     NodeBatch,
+    Node2VecWalkSampler,
     LinkPredictionRecord,
     LinkPredictionTask,
     LinkNeighborSampler,
@@ -88,9 +96,12 @@ from vgl import (
     PointTransformerConv,
     Poly1CrossEntropyTask,
     Poly1EpsilonScheduler,
+    PlanetoidDataset,
+    RandomWalkSampler,
     ResGatedGraphConv,
     RDropTask,
     SampleRecord,
+    ShaDowKHopSampler,
     SimpleConv,
     TemporalEventRecord,
     UniformNegativeLinkSampler,
@@ -143,6 +154,7 @@ from vgl import (
     TGNMemory,
     TGATEncoder,
     TGATLayer,
+    TUDataset,
     TimeEncoder,
     TrainingHistory,
     WarmupCosineScheduler,
@@ -168,10 +180,13 @@ def test_package_exposes_broad_vgl_root_surface():
     assert CSVLogger.__name__ == "CSVLogger"
     assert CGConv.__name__ == "CGConv"
     assert ChebConv.__name__ == "ChebConv"
+    assert ClusterData.__name__ == "ClusterData"
     assert ClusterGCNConv.__name__ == "ClusterGCNConv"
+    assert ClusterLoader.__name__ == "ClusterLoader"
     assert ConsoleLogger.__name__ == "ConsoleLogger"
     assert ConfidencePenaltyScheduler.__name__ == "ConfidencePenaltyScheduler"
     assert ConfidencePenaltyTask.__name__ == "ConfidencePenaltyTask"
+    assert DatasetRegistry.__name__ == "DatasetRegistry"
     assert DAGNNConv.__name__ == "DAGNNConv"
     assert DNAConv.__name__ == "DNAConv"
     assert EdgeConv.__name__ == "EdgeConv"
@@ -202,6 +217,9 @@ def test_package_exposes_broad_vgl_root_surface():
     assert GINEConv.__name__ == "GINEConv"
     assert Graph.__name__ == "Graph"
     assert GraphBatch.__name__ == "GraphBatch"
+    assert GraphSAINTEdgeSampler.__name__ == "GraphSAINTEdgeSampler"
+    assert GraphSAINTNodeSampler.__name__ == "GraphSAINTNodeSampler"
+    assert GraphSAINTRandomWalkSampler.__name__ == "GraphSAINTRandomWalkSampler"
     assert GraphConv.__name__ == "GraphConv"
     assert GraphTransformerEncoder.__name__ == "GraphTransformerEncoder"
     assert GraphTransformerEncoderLayer.__name__ == "GraphTransformerEncoderLayer"
@@ -227,6 +245,7 @@ def test_package_exposes_broad_vgl_root_surface():
     assert TemporalEventBatch.__name__ == "TemporalEventBatch"
     assert TemporalNeighborSampler.__name__ == "TemporalNeighborSampler"
     assert TensorBoardLogger.__name__ == "TensorBoardLogger"
+    assert TUDataset.__name__ == "TUDataset"
     assert UniformNegativeLinkSampler.__name__ == "UniformNegativeLinkSampler"
     assert PointNetConv.__name__ == "PointNetConv"
     assert PointTransformerConv.__name__ == "PointTransformerConv"
@@ -238,6 +257,7 @@ def test_package_exposes_broad_vgl_root_surface():
     assert GraphView.__name__ == "GraphView"
     assert H2GCNConv.__name__ == "H2GCNConv"
     assert IdentityTemporalMessage.__name__ == "IdentityTemporalMessage"
+    assert KarateClubDataset.__name__ == "KarateClubDataset"
     assert LastMessageAggregator.__name__ == "LastMessageAggregator"
     assert ListDataset.__name__ == "ListDataset"
     assert LGConv.__name__ == "LGConv"
@@ -247,10 +267,14 @@ def test_package_exposes_broad_vgl_root_surface():
     assert FullGraphSampler.__name__ == "FullGraphSampler"
     assert MeanMessageAggregator.__name__ == "MeanMessageAggregator"
     assert NodeSeedSubgraphSampler.__name__ == "NodeSeedSubgraphSampler"
+    assert Node2VecWalkSampler.__name__ == "Node2VecWalkSampler"
+    assert PlanetoidDataset.__name__ == "PlanetoidDataset"
+    assert RandomWalkSampler.__name__ == "RandomWalkSampler"
     assert ResGatedGraphConv.__name__ == "ResGatedGraphConv"
     assert RDropTask.__name__ == "RDropTask"
     assert LinkPredictionRecord.__name__ == "LinkPredictionRecord"
     assert SampleRecord.__name__ == "SampleRecord"
+    assert ShaDowKHopSampler.__name__ == "ShaDowKHopSampler"
     assert SimpleConv.__name__ == "SimpleConv"
     assert TemporalEventRecord.__name__ == "TemporalEventRecord"
     assert TGNMemory.__name__ == "TGNMemory"

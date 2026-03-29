@@ -217,6 +217,17 @@ def _resolve_link_reverse_edge_type(record):
     return tuple(reverse_edge_type)
 
 
+def _resolve_link_query_id(record):
+    query_id = getattr(record, "query_id", None)
+    if query_id is None:
+        query_id = record.metadata.get("query_id")
+    if query_id is None:
+        query_id = getattr(record, "sample_id", None)
+    if query_id is None:
+        query_id = record.metadata.get("sample_id")
+    return query_id
+
+
 def _resolve_temporal_edge_type(record):
     edge_type = getattr(record, "edge_type", None)
     if edge_type is None:
@@ -479,12 +490,16 @@ class GraphBatch:
         cls,
         samples: list["SampleRecord"],
         *,
-        label_key: str,
-        label_source: str,
+        label_key: str | None = None,
+        label_source: str | None = None,
     ) -> "GraphBatch":
         graphs = [sample.graph for sample in samples]
         batch = cls.from_graphs(graphs)
         batch.metadata = [sample.metadata for sample in samples]
+        if label_source is None:
+            return batch
+        if label_key is None:
+            raise ValueError("GraphBatch.from_samples requires label_key when label_source is set")
         if label_source == "graph":
             batch.labels = torch.tensor([
                 _graph_label_from_graph(sample.graph, label_key)
@@ -727,7 +742,7 @@ class LinkPredictionBatch:
         src_index = torch.tensor(src_values, dtype=torch.long)
         dst_index = torch.tensor(dst_values, dtype=torch.long)
         labels = torch.tensor([float(record.label) for record in records], dtype=torch.float32)
-        query_ids = [record.query_id for record in records]
+        query_ids = [_resolve_link_query_id(record) for record in records]
         filter_flags = [
             bool(getattr(record, "filter_ranking", False) or record.metadata.get("filter_ranking", False))
             for record in records

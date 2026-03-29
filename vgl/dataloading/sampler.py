@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 import torch
 
 from vgl.dataloading.executor import PlanExecutor
@@ -87,12 +89,20 @@ class FullGraphSampler(Sampler):
 
 
 class UniformNegativeLinkSampler(Sampler):
-    def __init__(self, num_negatives=1, *, exclude_positive_edges=True, exclude_seed_edges=False):
+    def __init__(
+        self,
+        num_negatives=1,
+        *,
+        exclude_positive_edges=True,
+        exclude_seed_edges=False,
+        skip_negative_seed_records: bool = False,
+    ):
         if num_negatives < 1:
             raise ValueError("num_negatives must be >= 1")
         self.num_negatives = int(num_negatives)
         self.exclude_positive_edges = bool(exclude_positive_edges)
         self.exclude_seed_edges = bool(exclude_seed_edges)
+        self.skip_negative_seed_records = bool(skip_negative_seed_records)
 
     def _candidate_destinations(self, item):
         edge_type, _, dst_type = _link_endpoint_types(item)
@@ -107,41 +117,110 @@ class UniformNegativeLinkSampler(Sampler):
                 mask[edge_index[1, positive_mask].to(dtype=torch.long)] = False
         return torch.arange(num_nodes, dtype=torch.long)[mask]
 
-    def _positive_seed_record(self, item):
+    def _resolved_query_id(self, item):
         query_id = item.query_id
         if query_id is None:
-            query_id = item.sample_id if item.sample_id is not None else id(item)
+            query_id = item.metadata.get("query_id")
+        if query_id is None:
+            query_id = self._resolved_sample_id(item)
+        if query_id is None:
+            query_id = id(item)
+        return query_id
+
+    def _resolved_sample_id(self, item):
+        sample_id = item.sample_id
+        if sample_id is None:
+            sample_id = item.metadata.get("sample_id")
+        return sample_id
+
+    def _resolved_hard_negative_dst(self, item):
+        raw_candidates = item.hard_negative_dst
+        if raw_candidates is None:
+            raw_candidates = item.metadata.get("hard_negative_dst")
+        return raw_candidates
+
+    def _resolved_candidate_dst(self, item):
+        raw_candidates = item.candidate_dst
+        if raw_candidates is None:
+            raw_candidates = item.metadata.get("candidate_dst")
+        return raw_candidates
+
+    def _resolved_exclude_seed_edge(self, item):
+        return bool(item.exclude_seed_edge) or bool(item.metadata.get("exclude_seed_edges", False)) or self.exclude_seed_edges
+
+    def _positive_seed_record(self, item):
+        sample_id = self._resolved_sample_id(item)
+        query_id = self._resolved_query_id(item)
+        hard_negative_dst = self._resolved_hard_negative_dst(item)
+        candidate_dst = self._resolved_candidate_dst(item)
+        edge_type = _resolve_link_edge_type(item)
+        reverse_edge_type = _resolve_link_reverse_edge_type(item)
+        exclude_seed_edge = self._resolved_exclude_seed_edge(item)
+        metadata = dict(item.metadata)
+        if sample_id is not None:
+            metadata["sample_id"] = sample_id
+        if query_id is not None:
+            metadata["query_id"] = query_id
+        metadata["edge_type"] = edge_type
+        if reverse_edge_type is not None:
+            metadata["reverse_edge_type"] = reverse_edge_type
+        if hard_negative_dst is not None:
+            metadata["hard_negative_dst"] = hard_negative_dst
+        if candidate_dst is not None:
+            metadata["candidate_dst"] = candidate_dst
+        if exclude_seed_edge:
+            metadata["exclude_seed_edges"] = True
         return LinkPredictionRecord(
             graph=item.graph,
             src_index=int(item.src_index),
             dst_index=int(item.dst_index),
             label=1,
-            metadata=dict(item.metadata),
-            sample_id=item.sample_id,
-            exclude_seed_edge=self.exclude_seed_edges,
-            hard_negative_dst=item.hard_negative_dst,
-            candidate_dst=item.candidate_dst,
-            edge_type=_resolve_link_edge_type(item),
-            reverse_edge_type=_resolve_link_reverse_edge_type(item),
+            metadata=metadata,
+            sample_id=sample_id,
+            exclude_seed_edge=exclude_seed_edge,
+            hard_negative_dst=hard_negative_dst,
+            candidate_dst=candidate_dst,
+            edge_type=edge_type,
+            reverse_edge_type=reverse_edge_type,
             query_id=query_id,
         )
 
     def _negative_record(self, item, dst_index, offset, *, hard_negative=False, query_id=None):
+        resolved_sample_id = self._resolved_sample_id(item)
+        hard_negative_dst = self._resolved_hard_negative_dst(item)
+        candidate_dst = self._resolved_candidate_dst(item)
+        edge_type = _resolve_link_edge_type(item)
+        reverse_edge_type = _resolve_link_reverse_edge_type(item)
         negative_metadata = dict(item.metadata)
+        negative_metadata.pop("exclude_seed_edges", None)
         negative_metadata["negative_sampled"] = True
         if hard_negative:
             negative_metadata["hard_negative_sampled"] = True
         suffix = "hard-neg" if hard_negative else "neg"
+        sample_id = None if resolved_sample_id is None else f"{resolved_sample_id}:{suffix}:{offset}"
+        if sample_id is not None:
+            negative_metadata["sample_id"] = sample_id
+        if query_id is not None:
+            negative_metadata["query_id"] = query_id
+        negative_metadata["edge_type"] = edge_type
+        if reverse_edge_type is not None:
+            negative_metadata["reverse_edge_type"] = reverse_edge_type
+        if hard_negative_dst is not None:
+            negative_metadata["hard_negative_dst"] = hard_negative_dst
+        if candidate_dst is not None:
+            negative_metadata["candidate_dst"] = candidate_dst
         return LinkPredictionRecord(
             graph=item.graph,
             src_index=int(item.src_index),
             dst_index=int(dst_index),
             label=0,
             metadata=negative_metadata,
-            sample_id=None if item.sample_id is None else f"{item.sample_id}:{suffix}:{offset}",
+            sample_id=sample_id,
             exclude_seed_edge=False,
-            edge_type=_resolve_link_edge_type(item),
-            reverse_edge_type=_resolve_link_reverse_edge_type(item),
+            hard_negative_dst=hard_negative_dst,
+            candidate_dst=candidate_dst,
+            edge_type=edge_type,
+            reverse_edge_type=reverse_edge_type,
             query_id=query_id,
         )
 
@@ -162,6 +241,8 @@ class UniformNegativeLinkSampler(Sampler):
         if not isinstance(item, LinkPredictionRecord):
             raise TypeError("UniformNegativeLinkSampler requires LinkPredictionRecord items")
         if int(item.label) != 1:
+            if self.skip_negative_seed_records and int(item.label) == 0:
+                return ()
             raise ValueError("UniformNegativeLinkSampler requires positive seed records")
         positive = self._positive_seed_record(item)
         sampled = [positive]
@@ -179,20 +260,30 @@ class HardNegativeLinkSampler(UniformNegativeLinkSampler):
         num_hard_negatives=1,
         exclude_positive_edges=True,
         exclude_seed_edges=False,
+        skip_negative_seed_records: bool = False,
+        hard_negative_dst_metadata_key: str | None = None,
     ):
         super().__init__(
             num_negatives=num_negatives,
             exclude_positive_edges=exclude_positive_edges,
             exclude_seed_edges=exclude_seed_edges,
+            skip_negative_seed_records=skip_negative_seed_records,
         )
         if num_hard_negatives < 0:
             raise ValueError("num_hard_negatives must be >= 0")
         self.num_hard_negatives = int(num_hard_negatives)
+        self.hard_negative_dst_metadata_key = hard_negative_dst_metadata_key
 
-    def _hard_negative_candidates(self, item):
+    def _resolved_hard_negative_dst(self, item):
         raw_candidates = item.hard_negative_dst
+        if raw_candidates is None and self.hard_negative_dst_metadata_key is not None:
+            raw_candidates = item.metadata.get(self.hard_negative_dst_metadata_key)
         if raw_candidates is None:
             raw_candidates = item.metadata.get("hard_negative_dst")
+        return raw_candidates
+
+    def _hard_negative_candidates(self, item):
+        raw_candidates = self._resolved_hard_negative_dst(item)
         if raw_candidates is None:
             return []
         candidates = torch.as_tensor(raw_candidates, dtype=torch.long).view(-1)
@@ -212,6 +303,8 @@ class HardNegativeLinkSampler(UniformNegativeLinkSampler):
         if not isinstance(item, LinkPredictionRecord):
             raise TypeError("HardNegativeLinkSampler requires LinkPredictionRecord items")
         if int(item.label) != 1:
+            if self.skip_negative_seed_records and int(item.label) == 0:
+                return ()
             raise ValueError("HardNegativeLinkSampler requires positive seed records")
 
         positive = self._positive_seed_record(item)
@@ -247,18 +340,33 @@ class HardNegativeLinkSampler(UniformNegativeLinkSampler):
 
 
 class CandidateLinkSampler(UniformNegativeLinkSampler):
-    def __init__(self, *, filter_known_positive_edges=True, exclude_seed_edges=False):
+    def __init__(
+        self,
+        *,
+        filter_known_positive_edges=True,
+        exclude_seed_edges=False,
+        skip_negative_seed_records: bool = True,
+        candidate_dst_metadata_key: str | None = None,
+    ):
         super().__init__(
             num_negatives=1,
             exclude_positive_edges=False,
             exclude_seed_edges=exclude_seed_edges,
+            skip_negative_seed_records=skip_negative_seed_records,
         )
         self.filter_known_positive_edges = bool(filter_known_positive_edges)
+        self.candidate_dst_metadata_key = candidate_dst_metadata_key
 
-    def _candidate_destinations(self, item):
+    def _resolved_candidate_dst(self, item):
         raw_candidates = item.candidate_dst
+        if raw_candidates is None and self.candidate_dst_metadata_key is not None:
+            raw_candidates = item.metadata.get(self.candidate_dst_metadata_key)
         if raw_candidates is None:
             raw_candidates = item.metadata.get("candidate_dst")
+        return raw_candidates
+
+    def _candidate_destinations(self, item):
+        raw_candidates = self._resolved_candidate_dst(item)
         _, _, dst_type = _link_endpoint_types(item)
         num_nodes = int(item.graph.nodes[dst_type].x.size(0))
         if raw_candidates is None:
@@ -285,6 +393,8 @@ class CandidateLinkSampler(UniformNegativeLinkSampler):
         if not isinstance(item, LinkPredictionRecord):
             raise TypeError("CandidateLinkSampler requires LinkPredictionRecord items")
         if int(item.label) != 1:
+            if self.skip_negative_seed_records and int(item.label) == 0:
+                return ()
             raise ValueError("CandidateLinkSampler requires positive seed records")
 
         positive = self._positive_seed_record(item)
@@ -315,6 +425,9 @@ class LinkNeighborSampler(Sampler):
         node_feature_names=None,
         edge_feature_names=None,
         output_blocks: bool = False,
+        replace: bool = False,
+        directed: bool = False,
+        candidate_dst_metadata_key: str | None = None,
     ):
         if isinstance(num_neighbors, int):
             num_neighbors = [num_neighbors]
@@ -327,6 +440,9 @@ class LinkNeighborSampler(Sampler):
         self.node_feature_names = node_feature_names
         self.edge_feature_names = edge_feature_names
         self.output_blocks = bool(output_blocks)
+        self.replace = bool(replace)
+        self.directed = bool(directed)
+        self.candidate_dst_metadata_key = candidate_dst_metadata_key
         self._generator = None
         if seed is not None:
             self._generator = torch.Generator()
@@ -377,15 +493,28 @@ class LinkNeighborSampler(Sampler):
         return ((graph._default_edge_type(), names),)
 
     def _seed_records(self, item):
+        if isinstance(item, LinkPredictionRecord):
+            item = self._record_with_candidate_pool(item)
         sampled = self.base_sampler.sample(item) if self.base_sampler is not None else item
         is_sequence = isinstance(sampled, (list, tuple))
         records = list(sampled) if is_sequence else [sampled]
-        if not records or any(not isinstance(record, LinkPredictionRecord) for record in records):
+        if not records:
+            return records, is_sequence
+        if any(not isinstance(record, LinkPredictionRecord) for record in records):
             raise TypeError("LinkNeighborSampler requires LinkPredictionRecord items")
         graph = records[0].graph
         if any(record.graph is not graph for record in records):
             raise ValueError("LinkNeighborSampler requires records from a single source graph")
         return records, is_sequence
+
+    def _record_with_candidate_pool(self, record: LinkPredictionRecord) -> LinkPredictionRecord:
+        if record.candidate_dst is not None or self.candidate_dst_metadata_key is None:
+            return record
+        if self.candidate_dst_metadata_key not in record.metadata:
+            return record
+        metadata = dict(record.metadata)
+        metadata["candidate_dst"] = metadata[self.candidate_dst_metadata_key]
+        return replace(record, candidate_dst=metadata["candidate_dst"], metadata=metadata)
 
     def _next_frontier(self, graph, frontier, visited, fanout):
         if not frontier:
@@ -595,36 +724,71 @@ class LinkNeighborSampler(Sampler):
         return Graph.hetero(nodes=nodes, edges=edges, time_attr=graph.schema.time_attr), node_mappings
 
     def _local_record(self, record, graph, node_mapping):
+        metadata = dict(record.metadata)
+        edge_type = _resolve_link_edge_type(record)
+        reverse_edge_type = _resolve_link_reverse_edge_type(record)
+        if record.sample_id is not None:
+            metadata["sample_id"] = record.sample_id
+        if record.query_id is not None:
+            metadata["query_id"] = record.query_id
+        metadata["edge_type"] = edge_type
+        if reverse_edge_type is not None:
+            metadata["reverse_edge_type"] = reverse_edge_type
+        if record.hard_negative_dst is not None:
+            metadata["hard_negative_dst"] = record.hard_negative_dst
+        if record.candidate_dst is not None:
+            metadata["candidate_dst"] = record.candidate_dst
+        if bool(record.exclude_seed_edge):
+            metadata["exclude_seed_edges"] = True
+        if bool(record.filter_ranking):
+            metadata["filter_ranking"] = True
         return LinkPredictionRecord(
             graph=graph,
             src_index=int(node_mapping[int(record.src_index)].item()),
             dst_index=int(node_mapping[int(record.dst_index)].item()),
             label=int(record.label),
-            metadata=dict(record.metadata),
+            metadata=metadata,
             sample_id=record.sample_id,
             exclude_seed_edge=bool(record.exclude_seed_edge),
             hard_negative_dst=record.hard_negative_dst,
             candidate_dst=record.candidate_dst,
-            edge_type=_resolve_link_edge_type(record),
-            reverse_edge_type=_resolve_link_reverse_edge_type(record),
+            edge_type=edge_type,
+            reverse_edge_type=reverse_edge_type,
             query_id=record.query_id,
             filter_ranking=bool(record.filter_ranking),
         )
 
     def _hetero_local_record(self, record, graph, node_mapping):
         edge_type, src_type, dst_type = _link_endpoint_types(record)
+        reverse_edge_type = _resolve_link_reverse_edge_type(record)
+        metadata = dict(record.metadata)
+        if record.sample_id is not None:
+            metadata["sample_id"] = record.sample_id
+        if record.query_id is not None:
+            metadata["query_id"] = record.query_id
+        metadata["edge_type"] = edge_type
+        if reverse_edge_type is not None:
+            metadata["reverse_edge_type"] = reverse_edge_type
+        if record.hard_negative_dst is not None:
+            metadata["hard_negative_dst"] = record.hard_negative_dst
+        if record.candidate_dst is not None:
+            metadata["candidate_dst"] = record.candidate_dst
+        if bool(record.exclude_seed_edge):
+            metadata["exclude_seed_edges"] = True
+        if bool(record.filter_ranking):
+            metadata["filter_ranking"] = True
         return LinkPredictionRecord(
             graph=graph,
             src_index=int(node_mapping[src_type][int(record.src_index)].item()),
             dst_index=int(node_mapping[dst_type][int(record.dst_index)].item()),
             label=int(record.label),
-            metadata=dict(record.metadata),
+            metadata=metadata,
             sample_id=record.sample_id,
             exclude_seed_edge=bool(record.exclude_seed_edge),
             hard_negative_dst=record.hard_negative_dst,
             candidate_dst=record.candidate_dst,
             edge_type=edge_type,
-            reverse_edge_type=_resolve_link_reverse_edge_type(record),
+            reverse_edge_type=reverse_edge_type,
             query_id=record.query_id,
             filter_ranking=bool(record.filter_ranking),
         )
@@ -662,6 +826,8 @@ class LinkNeighborSampler(Sampler):
 
     def build_plan(self, item) -> SamplingPlan:
         records, is_sequence = self._seed_records(item)
+        if not records:
+            return ()
         graph = records[0].graph
         if self.output_blocks:
             _single_link_edge_type(records, context="LinkNeighborSampler")
@@ -720,6 +886,8 @@ class LinkNeighborSampler(Sampler):
 
     def sample(self, item):
         plan = self.build_plan(item)
+        if not isinstance(plan, SamplingPlan):
+            return plan
         context = PlanExecutor().execute(plan, graph=plan.graph)
         return materialize_context(context)
 
@@ -732,10 +900,13 @@ class TemporalNeighborSampler(LinkNeighborSampler):
         time_window=None,
         max_events=None,
         strict_history=True,
+        include_seed_timestamp: bool | None = None,
         seed=None,
         node_feature_names=None,
         edge_feature_names=None,
     ):
+        if include_seed_timestamp is not None:
+            strict_history = not bool(include_seed_timestamp)
         super().__init__(
             num_neighbors=num_neighbors,
             base_sampler=None,
@@ -1095,8 +1266,16 @@ class NodeNeighborSampler(LinkNeighborSampler):
         node_feature_names=None,
         edge_feature_names=None,
         output_blocks: bool = False,
+        replace: bool = False,
+        directed: bool = False,
     ):
-        super().__init__(num_neighbors=num_neighbors, base_sampler=None, seed=seed)
+        super().__init__(
+            num_neighbors=num_neighbors,
+            base_sampler=None,
+            seed=seed,
+            replace=replace,
+            directed=directed,
+        )
         self.node_feature_names = node_feature_names
         self.edge_feature_names = edge_feature_names
         self.output_blocks = bool(output_blocks)

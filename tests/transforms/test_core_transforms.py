@@ -1,0 +1,158 @@
+import torch
+
+from vgl import Graph
+from vgl.dataloading import ListDataset
+from vgl.transforms import (
+    AddSelfLoops,
+    Compose,
+    FeatureStandardize,
+    IdentityTransform,
+    LargestConnectedComponents,
+    NormalizeFeatures,
+    RandomGraphSplit,
+    RandomNodeSplit,
+    RemoveSelfLoops,
+    ToUndirected,
+    TrainOnlyFeatureNormalizer,
+)
+
+
+def _base_graph():
+    return Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2], [1, 2, 3]]),
+        x=torch.tensor(
+            [
+                [2.0, 0.0],
+                [0.0, 4.0],
+                [1.0, 1.0],
+                [3.0, 3.0],
+            ]
+        ),
+        y=torch.tensor([0, 0, 1, 1]),
+    )
+
+
+def test_compose_applies_transforms_in_order():
+    graph = _base_graph()
+
+    transformed = Compose(
+        [
+            IdentityTransform(),
+            NormalizeFeatures(),
+            AddSelfLoops(),
+        ]
+    )(graph)
+
+    assert torch.allclose(transformed.x.sum(dim=1), torch.ones(4))
+    assert transformed.edge_index.size(1) == graph.edge_index.size(1) + graph.x.size(0)
+
+
+def test_random_node_split_adds_boolean_masks():
+    graph = _base_graph()
+
+    transformed = RandomNodeSplit(num_val=1, num_test=1, seed=7)(graph)
+
+    assert transformed.train_mask.dtype == torch.bool
+    assert transformed.val_mask.dtype == torch.bool
+    assert transformed.test_mask.dtype == torch.bool
+    assert int(transformed.train_mask.sum()) == 2
+    assert int(transformed.val_mask.sum()) == 1
+    assert int(transformed.test_mask.sum()) == 1
+
+
+def test_random_node_split_supports_class_balanced_train_selection():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2, 3, 4, 5], [1, 2, 0, 4, 5, 3]]),
+        x=torch.randn(6, 2),
+        y=torch.tensor([0, 0, 0, 1, 1, 1]),
+    )
+
+    transformed = RandomNodeSplit(num_train_per_class=1, num_val=2, num_test=2, seed=3)(graph)
+
+    train_labels = transformed.y[transformed.train_mask]
+    assert train_labels.numel() == 2
+    assert set(train_labels.tolist()) == {0, 1}
+
+
+def test_random_graph_split_returns_datasets():
+    graphs = [
+        Graph.homo(edge_index=torch.tensor([[0], [1]]), x=torch.randn(2, 2), y=torch.tensor([label]))
+        for label in (0, 1, 0, 1, 0)
+    ]
+
+    train_ds, val_ds, test_ds = RandomGraphSplit(num_val=1, num_test=1, seed=11)(graphs)
+
+    assert isinstance(train_ds, ListDataset)
+    assert len(train_ds) == 3
+    assert len(val_ds) == 1
+    assert len(test_ds) == 1
+
+
+def test_normalize_features_row_normalizes_x():
+    graph = _base_graph()
+
+    transformed = NormalizeFeatures()(graph)
+
+    assert torch.allclose(transformed.x.sum(dim=1), torch.ones(4))
+
+
+def test_feature_standardize_uses_full_dataset_statistics():
+    graph = _base_graph()
+
+    transformed = FeatureStandardize()(graph)
+
+    assert torch.allclose(transformed.x.mean(dim=0), torch.zeros(2), atol=1e-6)
+    assert torch.allclose(transformed.x.std(dim=0, unbiased=False), torch.ones(2), atol=1e-6)
+
+
+def test_train_only_feature_normalizer_uses_train_mask_statistics():
+    graph = _base_graph()
+    graph = RandomNodeSplit(num_val=1, num_test=1, seed=5)(graph)
+
+    transformed = TrainOnlyFeatureNormalizer()(graph)
+    train_x = transformed.x[transformed.train_mask]
+
+    assert torch.allclose(train_x.mean(dim=0), torch.zeros(2), atol=1e-6)
+    assert torch.allclose(train_x.std(dim=0, unbiased=False), torch.ones(2), atol=1e-6)
+
+
+def test_to_undirected_mirrors_edges_and_edge_features():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1], [1, 2]]),
+        x=torch.randn(3, 2),
+        edge_data={"weight": torch.tensor([0.5, 1.5])},
+    )
+
+    transformed = ToUndirected()(graph)
+    edges = {tuple(edge.tolist()) for edge in transformed.edge_index.t()}
+
+    assert edges == {(0, 1), (1, 0), (1, 2), (2, 1)}
+    assert transformed.edata["weight"].tolist() == [0.5, 1.5, 0.5, 1.5]
+
+
+def test_add_and_remove_self_loops_round_trip():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1], [1, 0]]),
+        x=torch.randn(2, 3),
+        edge_data={"weight": torch.tensor([2.0, 3.0])},
+    )
+
+    with_loops = AddSelfLoops(fill_value=1.25)(graph)
+    without_loops = RemoveSelfLoops()(with_loops)
+
+    loop_edges = {tuple(edge.tolist()) for edge in with_loops.edge_index.t()}
+    assert (0, 0) in loop_edges
+    assert (1, 1) in loop_edges
+    assert {tuple(edge.tolist()) for edge in without_loops.edge_index.t()} == {(0, 1), (1, 0)}
+
+
+def test_largest_connected_components_keeps_biggest_component():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 3], [1, 2, 4]]),
+        x=torch.arange(10, dtype=torch.float32).view(5, 2),
+    )
+
+    transformed = LargestConnectedComponents()(graph)
+
+    assert transformed.x.size(0) == 3
+    assert {tuple(edge.tolist()) for edge in transformed.edge_index.t()} == {(0, 1), (1, 2)}

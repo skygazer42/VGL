@@ -257,6 +257,124 @@ def test_legacy_data_package_reexports_sampler_base():
     assert LegacySampler is Sampler
 
 
+def test_legacy_data_package_reexports_advanced_sampling_surface():
+    from vgl.data import ClusterData as LegacyClusterData
+    from vgl.data import ClusterLoader as LegacyClusterLoader
+    from vgl.data import GraphSAINTEdgeSampler as LegacyGraphSAINTEdgeSampler
+    from vgl.data import GraphSAINTNodeSampler as LegacyGraphSAINTNodeSampler
+    from vgl.data import GraphSAINTRandomWalkSampler as LegacyGraphSAINTRandomWalkSampler
+    from vgl.data import Node2VecWalkSampler as LegacyNode2VecWalkSampler
+    from vgl.data import RandomWalkSampler as LegacyRandomWalkSampler
+    from vgl.data import ShaDowKHopSampler as LegacyShaDowKHopSampler
+    from vgl.dataloading import ClusterData
+    from vgl.dataloading import ClusterLoader
+    from vgl.dataloading import GraphSAINTEdgeSampler
+    from vgl.dataloading import GraphSAINTNodeSampler
+    from vgl.dataloading import GraphSAINTRandomWalkSampler
+    from vgl.dataloading import Node2VecWalkSampler
+    from vgl.dataloading import RandomWalkSampler
+    from vgl.dataloading import ShaDowKHopSampler
+
+    assert LegacyClusterData is ClusterData
+    assert LegacyClusterLoader is ClusterLoader
+    assert LegacyGraphSAINTEdgeSampler is GraphSAINTEdgeSampler
+    assert LegacyGraphSAINTNodeSampler is GraphSAINTNodeSampler
+    assert LegacyGraphSAINTRandomWalkSampler is GraphSAINTRandomWalkSampler
+    assert LegacyNode2VecWalkSampler is Node2VecWalkSampler
+    assert LegacyRandomWalkSampler is RandomWalkSampler
+    assert LegacyShaDowKHopSampler is ShaDowKHopSampler
+
+
+def test_legacy_data_sampler_module_reexports_advanced_sampling_samplers():
+    from vgl.data.sampler import GraphSAINTEdgeSampler as LegacyGraphSAINTEdgeSampler
+    from vgl.data.sampler import GraphSAINTNodeSampler as LegacyGraphSAINTNodeSampler
+    from vgl.data.sampler import GraphSAINTRandomWalkSampler as LegacyGraphSAINTRandomWalkSampler
+    from vgl.data.sampler import Node2VecWalkSampler as LegacyNode2VecWalkSampler
+    from vgl.data.sampler import RandomWalkSampler as LegacyRandomWalkSampler
+    from vgl.data.sampler import ShaDowKHopSampler as LegacyShaDowKHopSampler
+    from vgl.dataloading import GraphSAINTEdgeSampler
+    from vgl.dataloading import GraphSAINTNodeSampler
+    from vgl.dataloading import GraphSAINTRandomWalkSampler
+    from vgl.dataloading import Node2VecWalkSampler
+    from vgl.dataloading import RandomWalkSampler
+    from vgl.dataloading import ShaDowKHopSampler
+
+    assert LegacyGraphSAINTEdgeSampler is GraphSAINTEdgeSampler
+    assert LegacyGraphSAINTNodeSampler is GraphSAINTNodeSampler
+    assert LegacyGraphSAINTRandomWalkSampler is GraphSAINTRandomWalkSampler
+    assert LegacyNode2VecWalkSampler is Node2VecWalkSampler
+    assert LegacyRandomWalkSampler is RandomWalkSampler
+    assert LegacyShaDowKHopSampler is ShaDowKHopSampler
+
+
+def test_legacy_data_package_reexports_plan_and_materialization_surface():
+    from vgl.data import GraphSeedRequest as LegacyGraphSeedRequest
+    from vgl.data import LinkSeedRequest as LegacyLinkSeedRequest
+    from vgl.data import MaterializationContext as LegacyMaterializationContext
+    from vgl.data import NodeSeedRequest as LegacyNodeSeedRequest
+    from vgl.data import PlanExecutor as LegacyPlanExecutor
+    from vgl.data import PlanStage as LegacyPlanStage
+    from vgl.data import SamplingPlan as LegacySamplingPlan
+    from vgl.data import TemporalSeedRequest as LegacyTemporalSeedRequest
+    from vgl.data import materialize_batch as legacy_materialize_batch
+    from vgl.data import materialize_context as legacy_materialize_context
+    from vgl.dataloading import GraphSeedRequest
+    from vgl.dataloading import LinkSeedRequest
+    from vgl.dataloading import MaterializationContext
+    from vgl.dataloading import NodeSeedRequest
+    from vgl.dataloading import PlanExecutor
+    from vgl.dataloading import PlanStage
+    from vgl.dataloading import SamplingPlan
+    from vgl.dataloading import TemporalSeedRequest
+    from vgl.dataloading import materialize_batch
+    from vgl.dataloading import materialize_context
+
+    assert LegacyGraphSeedRequest is GraphSeedRequest
+    assert LegacyLinkSeedRequest is LinkSeedRequest
+    assert LegacyMaterializationContext is MaterializationContext
+    assert LegacyNodeSeedRequest is NodeSeedRequest
+    assert LegacyPlanExecutor is PlanExecutor
+    assert LegacyPlanStage is PlanStage
+    assert LegacySamplingPlan is SamplingPlan
+    assert LegacyTemporalSeedRequest is TemporalSeedRequest
+    assert legacy_materialize_batch is materialize_batch
+    assert legacy_materialize_context is materialize_context
+
+
+def test_legacy_data_modules_reexport_plan_and_materialization_surface():
+    from vgl.data.executor import MaterializationContext as LegacyMaterializationContext
+    from vgl.data.executor import PlanExecutor as LegacyPlanExecutor
+    from vgl.data.materialize import materialize_batch as legacy_materialize_batch
+    from vgl.data.materialize import materialize_context as legacy_materialize_context
+    from vgl.data.plan import PlanStage as LegacyPlanStage
+    from vgl.data.plan import SamplingPlan as LegacySamplingPlan
+    from vgl.data.requests import GraphSeedRequest as LegacyGraphSeedRequest
+    from vgl.data.requests import LinkSeedRequest as LegacyLinkSeedRequest
+    from vgl.data.requests import NodeSeedRequest as LegacyNodeSeedRequest
+    from vgl.data.requests import TemporalSeedRequest as LegacyTemporalSeedRequest
+    from vgl.dataloading import GraphSeedRequest
+    from vgl.dataloading import LinkSeedRequest
+    from vgl.dataloading import MaterializationContext
+    from vgl.dataloading import NodeSeedRequest
+    from vgl.dataloading import PlanExecutor
+    from vgl.dataloading import PlanStage
+    from vgl.dataloading import SamplingPlan
+    from vgl.dataloading import TemporalSeedRequest
+    from vgl.dataloading import materialize_batch
+    from vgl.dataloading import materialize_context
+
+    assert LegacyGraphSeedRequest is GraphSeedRequest
+    assert LegacyLinkSeedRequest is LinkSeedRequest
+    assert LegacyMaterializationContext is MaterializationContext
+    assert LegacyNodeSeedRequest is NodeSeedRequest
+    assert LegacyPlanExecutor is PlanExecutor
+    assert LegacyPlanStage is PlanStage
+    assert LegacySamplingPlan is SamplingPlan
+    assert LegacyTemporalSeedRequest is TemporalSeedRequest
+    assert legacy_materialize_batch is materialize_batch
+    assert legacy_materialize_context is materialize_context
+
+
 def test_legacy_core_package_reexports_graph_support_types():
     from vgl.core import EdgeStore as LegacyEdgeStore
     from vgl.core import GNNError as LegacyGNNError

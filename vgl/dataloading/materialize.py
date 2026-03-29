@@ -585,6 +585,8 @@ def materialize_batch(items, *, label_source=None, label_key=None):
         return LinkPredictionBatch.from_records(items)
     if isinstance(first, SampleRecord) and first.subgraph_seed is not None and label_source is None:
         return NodeBatch.from_samples(items)
+    if isinstance(first, SampleRecord):
+        return GraphBatch.from_samples(items, label_key=label_key, label_source=label_source)
     if hasattr(first, "graph") and label_source is not None and label_key is not None:
         return GraphBatch.from_samples(items, label_key=label_key, label_source=label_source)
     return GraphBatch.from_graphs(items)

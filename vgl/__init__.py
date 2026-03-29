@@ -37,22 +37,34 @@ from vgl.engine import TensorBoardLogger as TensorBoardLogger
 from vgl.engine import TrainingHistory as TrainingHistory
 from vgl.engine import WarmupCosineScheduler as WarmupCosineScheduler
 from vgl.dataloading import CandidateLinkSampler as CandidateLinkSampler
+from vgl.dataloading import ClusterData as ClusterData
+from vgl.dataloading import ClusterLoader as ClusterLoader
 from vgl.dataloading import DataLoader as DataLoader
 from vgl.dataloading import FullGraphSampler as FullGraphSampler
+from vgl.dataloading import GraphSAINTEdgeSampler as GraphSAINTEdgeSampler
+from vgl.dataloading import GraphSAINTNodeSampler as GraphSAINTNodeSampler
+from vgl.dataloading import GraphSAINTRandomWalkSampler as GraphSAINTRandomWalkSampler
 from vgl.dataloading import HardNegativeLinkSampler as HardNegativeLinkSampler
 from vgl.dataloading import LinkNeighborSampler as LinkNeighborSampler
-from vgl.dataloading import NodeNeighborSampler as NodeNeighborSampler
 from vgl.dataloading import LinkPredictionRecord as LinkPredictionRecord
 from vgl.dataloading import ListDataset as ListDataset
 from vgl.dataloading import Loader as Loader
+from vgl.dataloading import Node2VecWalkSampler as Node2VecWalkSampler
+from vgl.dataloading import NodeNeighborSampler as NodeNeighborSampler
 from vgl.dataloading import NodeSeedSubgraphSampler as NodeSeedSubgraphSampler
+from vgl.dataloading import RandomWalkSampler as RandomWalkSampler
 from vgl.dataloading import SampleRecord as SampleRecord
+from vgl.dataloading import ShaDowKHopSampler as ShaDowKHopSampler
 from vgl.dataloading import TemporalEventRecord as TemporalEventRecord
 from vgl.dataloading import TemporalNeighborSampler as TemporalNeighborSampler
 from vgl.dataloading import UniformNegativeLinkSampler as UniformNegativeLinkSampler
 from vgl.data import DatasetManifest as DatasetManifest
+from vgl.data import DatasetRegistry as DatasetRegistry
 from vgl.data import DatasetSplit as DatasetSplit
+from vgl.data import KarateClubDataset as KarateClubDataset
 from vgl.data import OnDiskGraphDataset as OnDiskGraphDataset
+from vgl.data import PlanetoidDataset as PlanetoidDataset
+from vgl.data import TUDataset as TUDataset
 from vgl.engine import Trainer as Trainer
 from vgl.graph import Block as Block
 from vgl.graph import Graph as Graph
@@ -166,6 +178,8 @@ __all__ = [
     "ASAM",
     "BootstrapBetaScheduler",
     "CandidateLinkSampler",
+    "ClusterData",
+    "ClusterLoader",
     "ConfidencePenaltyScheduler",
     "FloodingLevelScheduler",
     "GeneralizedCrossEntropyScheduler",
@@ -189,7 +203,9 @@ __all__ = [
     "ConsoleLogger",
     "DataLoader",
     "DatasetManifest",
+    "DatasetRegistry",
     "DatasetSplit",
+    "KarateClubDataset",
     "DeferredReweighting",
     "EarlyStopping",
     "ExponentialMovingAverage",
@@ -212,6 +228,9 @@ __all__ = [
     "Lookahead",
     "SAM",
     "FullGraphSampler",
+    "GraphSAINTEdgeSampler",
+    "GraphSAINTNodeSampler",
+    "GraphSAINTRandomWalkSampler",
     "HardNegativeLinkSampler",
     "HistoryLogger",
     "JSONLinesLogger",
@@ -222,7 +241,12 @@ __all__ = [
     "LinkNeighborSampler",
     "NodeNeighborSampler",
     "NodeSeedSubgraphSampler",
+    "Node2VecWalkSampler",
     "OnDiskGraphDataset",
+    "PlanetoidDataset",
+    "RandomWalkSampler",
+    "ShaDowKHopSampler",
+    "TUDataset",
     "TemporalNeighborSampler",
     "UniformNegativeLinkSampler",
     "LinkPredictionRecord",

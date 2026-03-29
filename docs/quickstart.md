@@ -28,6 +28,36 @@ from vgl.tasks import GraphClassificationTask, NodeClassificationTask
 
 Legacy `vgl.data` and `vgl.train` paths still work, but new code should prefer the package layout above.
 
+For public datasets and preprocessing, VGL now exposes:
+
+```python
+from vgl.data import KarateClubDataset, PlanetoidDataset, TUDataset
+from vgl.transforms import Compose, NormalizeFeatures, RandomNodeSplit
+
+cora = PlanetoidDataset(root="data", name="Cora", transform=Compose([NormalizeFeatures()]))
+karate = KarateClubDataset(
+    root="data",
+    transform=Compose([RandomNodeSplit(num_train_per_class=2, num_val=4, num_test=4, seed=0)]),
+)
+mutag = TUDataset(root="data", name="MUTAG")
+```
+
+`PlanetoidDataset` supports `Cora`, `Citeseer`, and `PubMed`; `TUDataset` supports standard TU graph-classification collections such as `MUTAG`, `PROTEINS`, and `ENZYMES`; and `KarateClubDataset` provides a zero-download starter graph. TU optional node labels, edge labels, and edge attributes are preserved as `graph.ndata["node_label"]`, `graph.edata["edge_label"]`, and `graph.edata["edge_attr"]`. `Compose`, `RandomNodeSplit`, `RandomGraphSplit`, `NormalizeFeatures`, `ToUndirected`, `AddSelfLoops`, `RemoveSelfLoops`, `LargestConnectedComponents`, `FeatureStandardize`, and `TrainOnlyFeatureNormalizer` cover the common preprocessing path.
+
+Split semantics stay explicit: `PlanetoidDataset` keeps the original citation masks, `KarateClubDataset` is typically paired with `RandomNodeSplit(...)`, and graph collections such as `TUDataset` should be split with `RandomGraphSplit(...)` when you need train/val/test partitions.
+
+For string-driven dataset creation, `DatasetRegistry.default()` also exposes aliases such as `cora`, `citeseer`, `pubmed`, `mutag`, `proteins`, and `enzymes`, accepts common hyphen/underscore variants such as `karate_club` or `imdb_binary`, now also accepts compact aliases such as `karateclub` or `imdbbinary`, and accepts family-prefixed forms such as `planetoid:cora`, `planetoid/cora`, `planetoid.cora`, `planetoid_pubmed`, `tu:proteins`, `tu/proteins`, `tu.proteins`, `tu.imdbbinary`, or `tu-imdbbinary`.
+
+For additional subgraph sampling workflows, `vgl.dataloading` now also exports `RandomWalkSampler`, `Node2VecWalkSampler`, `GraphSAINTNodeSampler`, `GraphSAINTEdgeSampler`, `GraphSAINTRandomWalkSampler`, `ClusterData`, `ClusterLoader`, and `ShaDowKHopSampler`.
+
+`RandomWalkSampler(..., num_walks=k)` and `Node2VecWalkSampler(..., num_walks=k)` keep the single-walk path behavior by default, but can now emit multiple walks for one scalar `metadata["seed"]` or use an explicit seed collection such as `metadata["seed"] = [0, 3, 8]`. They also expose `walk_starts`, `walk_start_positions`, `walk_nodes`, `walk_lengths`, `walk_ended_early`, `num_walks_ended_early`, `sampled_num_walks`, and `walk_edge_pairs` metadata alongside `walks`, so walk-oriented pipelines can inspect exact starts, where those starts landed inside the sampled subgraph, the unique visited node set, each walk's effective non-padding length, whether each walk terminated early at a dead end, the aggregate count of early-terminated walks, the actual number of traced walks without inferring it from nested list shapes, and the traversed edge sequence in original node-id space. `GraphSAINTRandomWalkSampler` follows the same `walk_lengths`, `walk_ended_early`, `num_walks_ended_early`, `sampled_num_walks`, `walk_start_positions`, and `walk_edge_pairs` conventions for its traced walks. When you want those explicit multi-seed inputs to materialize a `NodeBatch` instead of one graph sample, pass `expand_seeds=True`; VGL will then expand them into multiple `SampleRecord`s that share one sampled walk subgraph.
+
+The GraphSAINT samplers also accept explicit control metadata: `GraphSAINTNodeSampler` can force one or more seed nodes into the sampled subgraph, `GraphSAINTRandomWalkSampler` can take explicit walk starts through `metadata["seed"]`, and `GraphSAINTEdgeSampler` can force specific edge ids through `metadata["edge_id"]` or `metadata["edge_ids"]`. When `GraphSAINTNodeSampler` or `GraphSAINTRandomWalkSampler` receives multiple explicit seed nodes, VGL expands them into multiple `SampleRecord`s that share one sampled subgraph, so `Loader` can still build a `NodeBatch` with one `seed_index` entry per supervised node. `ShaDowKHopSampler` now follows the same pattern for explicit multi-seed inputs.
+For node-centered induced-subgraph sampling, `GraphSAINTNodeSampler`, `GraphSAINTEdgeSampler`, and `ShaDowKHopSampler` also expose `seed_positions`, which maps each `seed_ids` entry back to its local position inside `sampled_node_ids`.
+
+Across these advanced samplers, metadata now also records effective subgraph sizes through `sampled_num_nodes` and `sampled_num_edges`; induced-subgraph samplers additionally expose `subgraph_edge_ids` for the concrete original edges that landed in the sampled subgraph, along with a compatible `sampled_edge_ids` alias when the sampled edges correspond directly to original graph edges.
+For partition-style mini-batching, `ClusterData` samples also keep `cluster_id` plus a partition-oriented `partition_id` alias, and surface `num_parts` both at the top level and inside `sampling_config`.
+
 For advanced systems work, the new foundation layers sit underneath the same surface API:
 
 - `vgl.sparse` for cached COO/CSR/CSC adjacency layouts, multi-value edge payloads, transpose/reduction helpers, and sparse operators such as payload-aware `spmm(...)`, `sddmm(...)`, and `edge_softmax(...)`
@@ -222,6 +252,8 @@ task = LinkPredictionTask(target="label")
 trainer = Trainer(model=model, task=task, optimizer=torch.optim.Adam, lr=1e-3, max_epochs=10)
 trainer.fit(loader)
 ```
+
+When migrating existing link datasets, `HardNegativeLinkSampler(..., hard_negative_dst_metadata_key="hard_pool")` can read hard-negative destinations from a custom metadata key instead of requiring `hard_negative_dst`, and `CandidateLinkSampler(..., candidate_dst_metadata_key="candidate_pool")` does the same for ranking candidates in full-graph evaluation flows. Expanded negatives and candidates also keep `metadata["query_id"]` as the sampler-side query id when the record field is unset, and query grouping across sampled or direct full-graph batches falls back through `query_id`, `metadata["query_id"]`, `sample_id`, and `metadata["sample_id"]`. `CandidateLinkSampler` skips already-negative seed records by default, which lets ranking loaders consume split datasets that already include pre-sampled negatives, while `CandidateLinkSampler(..., skip_negative_seed_records=False)` restores strict positive-only validation when you want accidental negatives to fail fast. `UniformNegativeLinkSampler(..., skip_negative_seed_records=True)` and `HardNegativeLinkSampler(..., skip_negative_seed_records=True)` provide the same opt-in behavior for mixed-label training datasets. Resolved `query_id` values are normalized back onto emitted record metadata, metadata-backed `sample_id` values are also normalized back onto emitted positive and generated negative records, including suffixed negative sample ids, resolved seed-edge exclusion is mirrored onto positive-record metadata as `exclude_seed_edges=True`, and resolved relation types are mirrored back onto emitted metadata as `edge_type` / `reverse_edge_type`. `RandomLinkSplit` keeps stable `sample_id` values for every split record, preserves `query_id == sample_id` for positive supervision edges, reuses the owning positive `query_id` and source node for generated negatives so direct full-graph batches still group as query-local ranking queries, avoids duplicate negative destinations when that query still has enough unique negatives available, emits splits with generated negatives in query-grouped order so those ranking groups stay contiguous in direct batches, and marks positive split records with `exclude_seed_edge` / `metadata["exclude_seed_edges"]` so later batching or neighbor sampling can drop the supervision edge automatically. Resolved candidate / hard-negative pools are normalized back onto both emitted record fields and the standard metadata keys.
 
 For temporal event prediction from explicit candidate-event samples:
 

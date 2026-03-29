@@ -27,7 +27,9 @@
 
 - **Unified `Graph` object** — a single data structure for homogeneous, heterogeneous, and temporal graphs with schema validation, lightweight views, and batching.
 - **Dataset-style link prediction splits** — `RandomLinkSplit` creates train/val/test `LinkPredictionRecord` datasets that plug directly into the existing loader, sampler, and trainer stack.
+- **Public dataset and transform surface** — built-in datasets such as `KarateClubDataset`, `PlanetoidDataset` (`Cora`, `Citeseer`, `PubMed`), and `TUDataset` (standard TU graph-classification collections such as `MUTAG`, `PROTEINS`, and `ENZYMES`) now pair with composable preprocessing such as `Compose`, `RandomNodeSplit`, `RandomGraphSplit`, `NormalizeFeatures`, `ToUndirected`, `AddSelfLoops`, `RemoveSelfLoops`, `LargestConnectedComponents`, `FeatureStandardize`, and `TrainOnlyFeatureNormalizer`.
 - **Mini-batch neighbor sampling** — `NodeNeighborSampler`, `LinkNeighborSampler`, and `TemporalNeighborSampler` provide PyG/DGL-style local subgraph training for homogeneous, heterogeneous, and temporal node/link workloads, including relation-aware temporal event sampling for typed heterogeneous graphs, with opt-in plan-backed node/edge feature materialization for sampled node, link, and temporal batches. VGL also now exposes relation-local `to_block(...)` plus a lightweight `Block` container, and multi-relation `to_hetero_block(...)` plus `HeteroBlock`, for message-flow rewrites when one batch should be viewed as source/destination frontiers instead of one sampled subgraph. `NodeNeighborSampler(..., output_blocks=True)` materializes `NodeBatch.blocks` in outer-to-inner order while keeping `batch.graph` and `batch.seed_index` unchanged; homogeneous paths still emit `Block`, heterogeneous node workloads with exactly one inbound relation keep the relation-local `Block` path, and heterogeneous node workloads with zero or multiple inbound relations now emit per-hop `HeteroBlock` layers for both local full-graph sampling and stitched shard-local sampling through a coordinator-backed feature source. For link workloads, `LinkNeighborSampler(..., output_blocks=True)` now does the same without changing `batch.graph`, `src_index`, `dst_index`, or `labels`; homogeneous paths still emit `Block`, single-relation heterogeneous supervision keeps relation-local `Block`, and mixed-edge-type heterogeneous supervision can now emit full `HeteroBlock` layers through the same coordinator-backed feature source. When seed-edge exclusion is active those excluded supervision edges are removed from the block message-passing view as well. On shard-local graphs, coordinator-backed node and link sampling can now stitch cross-partition frontier nodes and edges into one sampled subgraph for homogeneous workloads and non-temporal heterogeneous node/link workloads, while `TemporalNeighborSampler` can stitch earlier cross-partition history for both homogeneous and typed heterogeneous temporal workloads.
+- **Advanced subgraph sampling** — `RandomWalkSampler`, `Node2VecWalkSampler`, `GraphSAINTNodeSampler`, `GraphSAINTEdgeSampler`, `GraphSAINTRandomWalkSampler`, `ClusterData`, `ClusterLoader`, and `ShaDowKHopSampler` add mainstream walk-, subgraph-, and partition-oriented workflows on top of the same loader surface.
 - **Foundation layers for scale** — `vgl.sparse`, `vgl.storage`, `vgl.ops`, `vgl.data`, and `vgl.distributed` provide sparse adjacency views, Laplacian sparse views, graph sparse-format state APIs, weighted DGL-style adjacency exports, external sparse adjacency export, raw adjacency tensor exports, storage-backed graphs, graph transforms including line graphs, inbound/outbound frontier subgraphs, relation-local `to_block(...)` plus multi-relation `to_hetero_block(...)` message-flow rewrites, metapath reachability, relation-local hetero subgraphs/compaction, dataset catalogs / lazy on-disk formats, and local partition primitives plus typed node / edge routing, relation-scoped edge feature fetches, and partition-scoped local, boundary, and incident graph queries while keeping `Graph`, `Loader`, and `Trainer` as the public entry points.
 - **50+ GNN convolution layers** — all built on a clean `MessagePassing` interface: `GCNConv`, `GATConv`, `SAGEConv`, `GINConv`, `TransformerConv`, and [many more](#supported-convolution-layers).
 - **Graph transformer encoders** — reusable encoder blocks such as `GraphTransformerEncoder`, `GraphormerEncoder`, `GPSLayer`, `NAGphormerEncoder`, and `SGFormerEncoder`.
@@ -66,6 +68,31 @@
 
 > Legacy imports (`vgl.core`, `vgl.data`, `vgl.train`) remain as compatibility layers but new code should use the layout above.
 
+### Preferred Imports and Compatibility
+
+For new code, prefer the domain packages directly:
+
+```python
+from vgl.graph import Graph
+from vgl.dataloading import DataLoader, LinkNeighborSampler, RandomWalkSampler
+from vgl.transforms import Compose, NormalizeFeatures, RandomNodeSplit
+from vgl.engine import Trainer
+```
+
+Older import paths are still supported as compatibility shims while you migrate existing projects:
+
+```python
+from vgl.core import Graph
+from vgl.data import DataLoader, LinkNeighborSampler, RandomWalkSampler, PlanStage
+from vgl.data.sampler import GraphSAINTEdgeSampler
+from vgl.data.transform import RandomLinkSplit
+from vgl.data.plan import SamplingPlan
+from vgl.data.executor import PlanExecutor
+from vgl.train import Trainer
+```
+
+Those compatibility layers intentionally forward to the same underlying implementations. That means older code can keep running while newer code standardizes on `vgl.graph`, `vgl.dataloading`, `vgl.transforms`, and `vgl.engine`.
+
 ### Foundation Layers
 
 - `vgl.sparse` is where adjacency layouts and sparse execution helpers live. It now exposes COO/CSR/CSC conversion, bidirectional interop with native `torch.sparse_*` COO/CSR/CSC tensors, transpose, row/column structural selection, sparse edge payloads shaped `(nnz, ...)`, additive reductions that preserve trailing payload dimensions, sampled dense-dense matmul through `sddmm(...)`, edge-wise normalization through `edge_softmax(...)`, and `spmm(...)` that preserves sparse payload dimensions while appending dense feature channels at the end of the output shape, plus cached adjacency views through `Graph.adjacency(...)` and incidence-matrix views through `Graph.inc(...)`.
@@ -83,6 +110,28 @@ These layers are intentionally underneath the user-facing API: models still cons
 <p align="center">
   <img src="https://raw.githubusercontent.com/skygazer42/sky-vgl/main/assets/pipeline.svg" width="780" alt="VGL Training Pipeline"/>
 </p>
+
+### Public Datasets and Preprocessing
+
+```python
+from vgl.data import KarateClubDataset, PlanetoidDataset, TUDataset
+from vgl.transforms import Compose, NormalizeFeatures, RandomNodeSplit
+
+cora = PlanetoidDataset(
+    root="data",
+    name="Cora",
+    transform=Compose([NormalizeFeatures()]),
+)
+karate = KarateClubDataset(
+    root="data",
+    transform=Compose([RandomNodeSplit(num_train_per_class=2, num_val=4, num_test=4, seed=0)]),
+)
+mutag = TUDataset(root="data", name="MUTAG")
+```
+
+`PlanetoidDataset` loads a single citation graph with original `train_mask` / `val_mask` / `test_mask`, `KarateClubDataset` gives a zero-dependency node-classification starter graph, and `TUDataset` loads standard TU graph-classification collections such as `MUTAG`, `PROTEINS`, and `ENZYMES`. When TU raw files include optional node labels, edge labels, or edge attributes, they are preserved as `graph.ndata["node_label"]`, `graph.edata["edge_label"]`, and `graph.edata["edge_attr"]`.
+
+If you want a string-driven factory similar to larger graph libraries, `DatasetRegistry.default()` exposes aliases such as `cora`, `citeseer`, `pubmed`, `mutag`, `proteins`, and `enzymes`, accepts common hyphen/underscore variants such as `karate_club` or `imdb_binary`, also accepts compact aliases such as `karateclub` or `imdbbinary`, and understands family-prefixed forms such as `planetoid:cora`, `planetoid/cora`, `planetoid.cora`, `planetoid_pubmed`, `tu:proteins`, `tu/proteins`, `tu.proteins`, `tu.imdbbinary`, or `tu-imdbbinary`.
 
 ### Node Classification
 
@@ -289,7 +338,7 @@ task = LinkPredictionTask(target="label", metrics=["mrr", "filtered_mrr", "filte
 history = trainer.evaluate(eval_loader)
 ```
 
-Use `UniformNegativeLinkSampler` or `HardNegativeLinkSampler` for training-time sampled negatives, `CandidateLinkSampler` for validation/test-time ranking over all destinations or an explicit `candidate_dst` set, and wrap either one with `LinkNeighborSampler` when you want mini-batch message passing on local subgraphs instead of full-graph propagation.
+Use `UniformNegativeLinkSampler` or `HardNegativeLinkSampler` for training-time sampled negatives, `CandidateLinkSampler` for validation/test-time ranking over all destinations or an explicit `candidate_dst` set, and wrap either one with `LinkNeighborSampler` when you want mini-batch message passing on local subgraphs instead of full-graph propagation. For compatibility with existing dataset schemas, `HardNegativeLinkSampler(..., hard_negative_dst_metadata_key="hard_pool")` can read hard-negative pools from a custom metadata field, `CandidateLinkSampler(..., candidate_dst_metadata_key="candidate_pool")` can read ranking candidates from a custom metadata field in full-graph evaluation, and `LinkNeighborSampler(..., candidate_dst_metadata_key="candidate_pool")` keeps the same compatibility path for sampled ranking flows. `CandidateLinkSampler` skips already-negative seed records by default so evaluation loaders can consume split datasets that already contain pre-sampled negatives, and `CandidateLinkSampler(..., skip_negative_seed_records=False)` restores strict positive-only validation when you want that guardrail instead. `UniformNegativeLinkSampler(..., skip_negative_seed_records=True)` / `HardNegativeLinkSampler(..., skip_negative_seed_records=True)` provide the same opt-in behavior for mixed-label training datasets. Expanded link samplers now also preserve `metadata["query_id"]` when the record field is unset, and both sampled and direct full-graph link batches resolve query grouping through `query_id`, then `metadata["query_id"]`, then `sample_id`, then `metadata["sample_id"]`. Resolved `query_id` values are normalized back onto emitted positive and generated negative record metadata, metadata-backed `sample_id` values are normalized back onto emitted positive and generated negative records as well, including generated negative suffixes such as `:neg:0`, resolved seed-edge exclusion is mirrored onto positive-record metadata as `exclude_seed_edges=True`, and resolved `edge_type` / `reverse_edge_type` values are mirrored back onto emitted metadata for relation-aware downstream flows. For split-generated link datasets, `RandomLinkSplit` keeps every record's `sample_id` stable, preserves `query_id == sample_id` for positive supervision records, and now binds generated negatives back to their owning positive `query_id` while reusing that positive source node so direct full-graph batches form query-local ranking groups without an extra sampler pass; when enough unique negative destinations exist for that query, those split-time negatives also avoid duplicate destinations, and splits with generated negatives emit records in query-grouped order so direct batches keep each ranking group contiguous. The resolved candidate / hard-negative pools are normalized back onto both the emitted `LinkPredictionRecord.candidate_dst` / `LinkPredictionRecord.hard_negative_dst` fields and the standard metadata keys `candidate_dst` / `hard_negative_dst`.
 
 Pass `node_feature_names=...` and `edge_feature_names=...` to `LinkNeighborSampler` when those sampled link subgraphs should rehydrate node/edge tensors from an external feature store. For heterogeneous graphs, provide dictionaries keyed by node type and edge type.
 
@@ -308,7 +357,7 @@ train_ds, val_ds, test_ds = RandomLinkSplit(
 
 Each resulting `LinkPredictionRecord` keeps `edge_type` (and optional `reverse_edge_type`) so negative sampling, neighbor sampling, and seed-edge exclusion stay relation-aware.
 
-`disjoint_train_ratio` holds out a fraction of train positives as supervision-only edges (removed from train/val/test message-passing graphs), while `neg_sampling_ratio` can add pre-sampled negatives directly into split datasets when you want split-time labels instead of sampler-time negatives.
+`disjoint_train_ratio` holds out a fraction of train positives as supervision-only edges (removed from train/val/test message-passing graphs), while `neg_sampling_ratio` can add pre-sampled negatives directly into split datasets when you want split-time labels instead of sampler-time negatives. Split-generated records now also expose stable `sample_id` values, mirror that identifier onto positive-record `query_id` and metadata, bind generated negatives back onto the owning positive `query_id` and source node for direct ranking-style batching, avoid duplicate negative destinations when the query still has enough unique negatives left, emit splits with generated negatives in query-grouped order, and mark positive supervision edges with `exclude_seed_edge` / `metadata["exclude_seed_edges"]` so downstream batch collation and sampled message passing can hide the target edge without extra dataset-side plumbing.
 
 `LinkPredictionBatch` now also supports mixing multiple heterogeneous supervision relations in the same mini-batch, exposing `batch.edge_types` and `batch.edge_type_index` so models can route each record to the correct source/destination node-type encoders.
 
@@ -503,11 +552,27 @@ python examples/homo/node_classification.py
 # Run the full test suite
 python -m pytest -v
 
+# Scan public exports, legacy compatibility shims, and example entrypoints
+python scripts/public_surface_scan.py
+
+# Scan repository-wide packaging, workflow, docs, and asset contracts
+python scripts/full_scan.py
+
+# Scan README/public docs links without network access
+python scripts/docs_link_scan.py
+
 # Lint check
 python -m ruff check .
 
 # Type check
 python -m mypy vgl
+```
+
+If you are preparing a release artifact locally, also build the distributions and run:
+
+```bash
+python -m build --outdir dist
+python scripts/release_contract_scan.py --artifact-dir dist
 ```
 
 The test suite covers:

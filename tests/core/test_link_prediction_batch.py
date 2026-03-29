@@ -113,6 +113,58 @@ def test_link_prediction_batch_tracks_filter_mask():
     assert torch.equal(batch.filter_mask, torch.tensor([False, True, False]))
 
 
+def test_link_prediction_batch_builds_query_index_from_metadata_backed_query_ids():
+    graph = _graph()
+    batch = LinkPredictionBatch.from_records(
+        [
+            LinkPredictionRecord(graph=graph, src_index=0, dst_index=1, label=1, metadata={"query_id": "q0"}),
+            LinkPredictionRecord(graph=graph, src_index=0, dst_index=2, label=0, metadata={"query_id": "q0"}),
+            LinkPredictionRecord(graph=graph, src_index=2, dst_index=0, label=0, metadata={"query_id": "q1"}),
+        ]
+    )
+
+    assert torch.equal(batch.query_index, torch.tensor([0, 0, 1]))
+
+
+def test_link_prediction_batch_falls_back_to_sample_ids_for_query_index():
+    graph = _graph()
+    batch = LinkPredictionBatch.from_records(
+        [
+            LinkPredictionRecord(graph=graph, src_index=0, dst_index=1, label=1, sample_id="q0"),
+            LinkPredictionRecord(graph=graph, src_index=0, dst_index=2, label=0, sample_id="q0"),
+            LinkPredictionRecord(graph=graph, src_index=2, dst_index=0, label=0, sample_id="q1"),
+        ]
+    )
+
+    assert torch.equal(batch.query_index, torch.tensor([0, 0, 1]))
+
+
+def test_link_prediction_batch_ignores_none_metadata_query_ids_and_still_falls_back_to_sample_id():
+    graph = _graph()
+    batch = LinkPredictionBatch.from_records(
+        [
+            LinkPredictionRecord(graph=graph, src_index=0, dst_index=1, label=1, sample_id="q0", metadata={"query_id": None}),
+            LinkPredictionRecord(graph=graph, src_index=0, dst_index=2, label=0, sample_id="q0", metadata={"query_id": None}),
+            LinkPredictionRecord(graph=graph, src_index=2, dst_index=0, label=0, sample_id="q1", metadata={"query_id": None}),
+        ]
+    )
+
+    assert torch.equal(batch.query_index, torch.tensor([0, 0, 1]))
+
+
+def test_link_prediction_batch_can_fall_back_to_metadata_backed_sample_ids_for_query_index():
+    graph = _graph()
+    batch = LinkPredictionBatch.from_records(
+        [
+            LinkPredictionRecord(graph=graph, src_index=0, dst_index=1, label=1, metadata={"sample_id": "q0"}),
+            LinkPredictionRecord(graph=graph, src_index=0, dst_index=2, label=0, metadata={"sample_id": "q0"}),
+            LinkPredictionRecord(graph=graph, src_index=2, dst_index=0, label=0, metadata={"sample_id": "q1"}),
+        ]
+    )
+
+    assert torch.equal(batch.query_index, torch.tensor([0, 0, 1]))
+
+
 def test_link_prediction_batch_batches_hetero_graphs_for_single_edge_type():
     edge_type = ("author", "writes", "paper")
     g1 = Graph.hetero(

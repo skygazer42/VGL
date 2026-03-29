@@ -3,6 +3,7 @@ from vgl.dataloading.dataset import ListDataset
 from vgl.dataloading.records import LinkPredictionRecord
 from vgl.graph.stores import EdgeStore
 from vgl.graph.view import GraphView
+from vgl.transforms.base import BaseTransform
 
 
 def _slice_edge_store(store, indices):
@@ -27,7 +28,7 @@ def _edge_subgraph(graph, edge_indices_by_type):
     return GraphView(base=base, nodes=graph.nodes, edges=edges, schema=graph.schema)
 
 
-class RandomLinkSplit:
+class RandomLinkSplit(BaseTransform):
     def __init__(
         self,
         num_val=0.1,
@@ -119,6 +120,7 @@ class RandomLinkSplit:
         for edge_id in indices:
             src_index = int(edge_index[0, edge_id].item())
             dst_index = int(edge_index[1, edge_id].item())
+            sample_id = f"{split}:{edge_id}"
             records.append(
                 LinkPredictionRecord(
                     graph=graph,
@@ -130,10 +132,15 @@ class RandomLinkSplit:
                         "edge_id": int(edge_id),
                         "edge_type": edge_type,
                         "reverse_edge_type": reverse_edge_type,
+                        "sample_id": sample_id,
+                        "query_id": sample_id,
+                        "exclude_seed_edges": True,
                     },
-                    sample_id=f"{split}:{edge_id}",
+                    sample_id=sample_id,
+                    exclude_seed_edge=True,
                     edge_type=edge_type,
                     reverse_edge_type=reverse_edge_type,
+                    query_id=sample_id,
                 )
             )
         return records
@@ -170,6 +177,30 @@ class RandomLinkSplit:
                     break
         return sorted(sampled)
 
+    def _sample_negative_destinations_for_source(
+        self,
+        *,
+        src_index,
+        count,
+        num_dst_nodes,
+        excluded_edges,
+        generator,
+    ):
+        if count <= 0:
+            return []
+        candidates = [dst_index for dst_index in range(num_dst_nodes) if (int(src_index), int(dst_index)) not in excluded_edges]
+        if not candidates:
+            raise ValueError("RandomLinkSplit could not sample negatives for a validation/test query")
+        if count <= len(candidates):
+            permutation = torch.randperm(len(candidates), generator=generator)[:count].tolist()
+            return [int(candidates[index]) for index in permutation]
+
+        sampled = list(candidates)
+        remaining = count - len(candidates)
+        indices = torch.randint(len(candidates), (remaining,), generator=generator)
+        sampled.extend(int(candidates[index]) for index in indices.tolist())
+        return sampled
+
     def _attach_negative_records(
         self,
         *,
@@ -188,34 +219,49 @@ class RandomLinkSplit:
         negative_count = self._resolve_negative_count(len(records))
         if negative_count <= 0:
             return records
-
-        negative_edges = self._sample_negative_edges(
-            count=negative_count,
-            num_src_nodes=num_src_nodes,
-            num_dst_nodes=num_dst_nodes,
-            excluded_edges=excluded_edges,
-            generator=generator,
-        )
-        augmented = list(records)
-        for offset, (src_index, dst_index) in enumerate(negative_edges):
-            augmented.append(
-                LinkPredictionRecord(
-                    graph=graph,
-                    src_index=src_index,
-                    dst_index=dst_index,
-                    label=0,
-                    metadata={
-                        "split": split,
-                        "edge_id": None,
-                        "negative_sampled": True,
-                        "edge_type": edge_type,
-                        "reverse_edge_type": reverse_edge_type,
-                    },
-                    sample_id=f"{split}:neg:{offset}",
-                    edge_type=edge_type,
-                    reverse_edge_type=reverse_edge_type,
-                )
+        positive_query_ids = [
+            record.query_id if record.query_id is not None else record.metadata.get("query_id", record.sample_id)
+            for record in records
+        ]
+        counts_by_record = [0] * len(records)
+        for offset in range(negative_count):
+            counts_by_record[offset % len(records)] += 1
+        augmented = []
+        sample_offset = 0
+        for record, count in zip(records, counts_by_record):
+            augmented.append(record)
+            destinations = self._sample_negative_destinations_for_source(
+                src_index=int(record.src_index),
+                count=count,
+                num_dst_nodes=num_dst_nodes,
+                excluded_edges=excluded_edges,
+                generator=generator,
             )
+            for dst_index in destinations:
+                sample_id = f"{split}:neg:{sample_offset}"
+                query_id = record.query_id if record.query_id is not None else positive_query_ids[sample_offset % len(positive_query_ids)]
+                augmented.append(
+                    LinkPredictionRecord(
+                        graph=graph,
+                        src_index=int(record.src_index),
+                        dst_index=int(dst_index),
+                        label=0,
+                        metadata={
+                            "split": split,
+                            "edge_id": None,
+                            "negative_sampled": True,
+                            "edge_type": edge_type,
+                            "reverse_edge_type": reverse_edge_type,
+                            "sample_id": sample_id,
+                            "query_id": query_id,
+                        },
+                        sample_id=sample_id,
+                        edge_type=edge_type,
+                        reverse_edge_type=reverse_edge_type,
+                        query_id=query_id,
+                    )
+                )
+                sample_offset += 1
         return augmented
 
     def __call__(self, graph):

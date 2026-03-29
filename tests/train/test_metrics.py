@@ -107,6 +107,35 @@ def test_filtered_hits_at_k_ignores_masked_candidates():
     assert metric.compute() == pytest.approx(1.0)
 
 
+def test_mrr_handles_non_consecutive_query_indices():
+    class Batch:
+        query_index = torch.tensor([0, 1, 1, 0])
+
+    metric = MRR()
+    metric.update(
+        torch.tensor([0.9, 0.2, 0.8, 0.1]),
+        torch.tensor([1.0, 1.0, 0.0, 0.0]),
+        batch=Batch(),
+    )
+
+    assert metric.compute() == pytest.approx((1.0 + 0.5) / 2.0)
+
+
+def test_filtered_mrr_handles_non_consecutive_query_indices():
+    class Batch:
+        query_index = torch.tensor([0, 1, 1, 0, 0])
+        filter_mask = torch.tensor([False, False, False, False, True])
+
+    metric = FilteredMRR()
+    metric.update(
+        torch.tensor([0.9, 0.2, 0.4, 0.1, 0.95]),
+        torch.tensor([1.0, 1.0, 0.0, 0.0, 0.0]),
+        batch=Batch(),
+    )
+
+    assert metric.compute() == pytest.approx((1.0 + 0.5) / 2.0)
+
+
 def test_build_metric_rejects_unknown_name():
     with pytest.raises(ValueError, match="Unsupported metric"):
         build_metric("f1")

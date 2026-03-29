@@ -183,6 +183,8 @@ class Loader:
                 batch_items = []
                 for sampled in sampled_batch:
                     self._append_sampled(batch_items, sampled)
+                if not batch_items:
+                    continue
                 yield self._finalize_batch(batch_items)
             return
 
@@ -202,6 +204,9 @@ class Loader:
             batch = []
             for _ in range(min(self.batch_size, len(pending))):
                 self._append_sampled(batch, pending.popleft())
+            if not batch:
+                fill_pending(self.batch_size + self.prefetch)
+                continue
             yield self._finalize_batch(batch)
             fill_pending(self.batch_size + self.prefetch)
 

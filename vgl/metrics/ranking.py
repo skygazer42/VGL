@@ -37,6 +37,10 @@ def _filtered_rank_inputs(predictions, targets, batch):
     return predictions, targets, query_index, filter_mask
 
 
+def _ordered_unique_query_ids(query_index):
+    return tuple(dict.fromkeys(int(query_id) for query_id in query_index.detach().cpu().tolist()))
+
+
 class MRR(Metric):
     name = "mrr"
 
@@ -49,7 +53,7 @@ class MRR(Metric):
 
     def update(self, predictions, targets, *, batch=None):
         predictions, targets, query_index = _ranking_inputs(predictions, targets, batch)
-        for query_id in torch.unique_consecutive(query_index):
+        for query_id in _ordered_unique_query_ids(query_index):
             mask = query_index == query_id
             rank = _positive_rank(predictions[mask], targets[mask])
             self.total_reciprocal_rank += 1.0 / rank
@@ -75,7 +79,7 @@ class HitsAtK(Metric):
 
     def update(self, predictions, targets, *, batch=None):
         predictions, targets, query_index = _ranking_inputs(predictions, targets, batch)
-        for query_id in torch.unique_consecutive(query_index):
+        for query_id in _ordered_unique_query_ids(query_index):
             mask = query_index == query_id
             rank = _positive_rank(predictions[mask], targets[mask])
             self.total_hits += int(rank <= self.k)
@@ -99,7 +103,7 @@ class FilteredMRR(Metric):
 
     def update(self, predictions, targets, *, batch=None):
         predictions, targets, query_index, filter_mask = _filtered_rank_inputs(predictions, targets, batch)
-        for query_id in torch.unique_consecutive(query_index):
+        for query_id in _ordered_unique_query_ids(query_index):
             mask = query_index == query_id
             active_mask = mask & ~filter_mask
             rank = _positive_rank(predictions[active_mask], targets[active_mask])
@@ -126,7 +130,7 @@ class FilteredHitsAtK(Metric):
 
     def update(self, predictions, targets, *, batch=None):
         predictions, targets, query_index, filter_mask = _filtered_rank_inputs(predictions, targets, batch)
-        for query_id in torch.unique_consecutive(query_index):
+        for query_id in _ordered_unique_query_ids(query_index):
             mask = query_index == query_id
             active_mask = mask & ~filter_mask
             rank = _positive_rank(predictions[active_mask], targets[active_mask])

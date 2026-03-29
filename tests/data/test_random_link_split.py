@@ -212,3 +212,135 @@ def test_random_link_split_can_add_negative_samples():
         assert 1 in labels
         assert positives.isdisjoint(negatives)
         assert negatives.isdisjoint(positive_edges)
+
+
+def test_random_link_split_records_expose_stable_sample_ids_and_grouped_query_identifiers():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 0, 1, 2, 3], [1, 2, 2, 3, 0]]),
+        x=torch.randn(4, 3),
+    )
+
+    train_dataset, val_dataset, test_dataset = RandomLinkSplit(
+        num_val=1,
+        num_test=1,
+        neg_sampling_ratio=1.0,
+        add_negative_train_samples=True,
+        seed=9,
+    )(graph)
+
+    split_datasets = {
+        "train": list(train_dataset),
+        "val": list(val_dataset),
+        "test": list(test_dataset),
+    }
+    records = [record for dataset in split_datasets.values() for record in dataset]
+    positive_records = [record for record in records if int(record.label) == 1]
+
+    assert all(record.sample_id is not None for record in records)
+    assert all(record.metadata["sample_id"] == record.sample_id for record in records)
+    assert all(record.metadata["query_id"] == record.query_id for record in records)
+    assert all(record.query_id == record.sample_id for record in positive_records)
+
+    for split_name, dataset in split_datasets.items():
+        positive_query_ids = {
+            record.query_id
+            for record in dataset
+            if int(record.label) == 1
+        }
+        negative_records = [record for record in dataset if int(record.label) == 0]
+        assert all(record.query_id in positive_query_ids for record in negative_records)
+        assert all(record.query_id != record.sample_id for record in negative_records)
+
+
+def test_random_link_split_validation_negatives_stay_query_local_for_ranking_style_batches():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 0, 1, 2, 3], [1, 2, 2, 3, 0]]),
+        x=torch.randn(4, 3),
+    )
+
+    _, val_dataset, _ = RandomLinkSplit(
+        num_val=1,
+        num_test=1,
+        neg_sampling_ratio=2.0,
+        add_negative_train_samples=False,
+        seed=0,
+    )(graph)
+
+    positive_records = [record for record in val_dataset if int(record.label) == 1]
+    negative_records = [record for record in val_dataset if int(record.label) == 0]
+
+    assert len(positive_records) == 1
+    assert len(negative_records) == 2
+    assert all(int(record.src_index) == int(positive_records[0].src_index) for record in negative_records)
+    assert all(record.query_id == positive_records[0].query_id for record in negative_records)
+
+
+def test_random_link_split_validation_negatives_avoid_duplicate_destinations_when_unique_candidates_exist():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 0, 0, 1, 1, 2, 3], [1, 2, 3, 2, 3, 3, 0]]),
+        x=torch.randn(5, 3),
+    )
+
+    _, val_dataset, _ = RandomLinkSplit(
+        num_val=1,
+        num_test=1,
+        neg_sampling_ratio=4.0,
+        add_negative_train_samples=False,
+        seed=0,
+    )(graph)
+
+    positive_records = [record for record in val_dataset if int(record.label) == 1]
+    negative_records = [record for record in val_dataset if int(record.label) == 0]
+    negative_dst = [int(record.dst_index) for record in negative_records]
+
+    assert len(positive_records) == 1
+    assert len(negative_records) == 4
+    assert len(set(negative_dst)) == len(negative_dst)
+
+
+def test_random_link_split_train_negatives_stay_query_local_when_added_to_split():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 0, 1, 1, 2, 3], [1, 2, 2, 3, 3, 0]]),
+        x=torch.randn(4, 3),
+    )
+
+    train_dataset, _, _ = RandomLinkSplit(
+        num_val=1,
+        num_test=1,
+        neg_sampling_ratio=1.0,
+        add_negative_train_samples=True,
+        seed=0,
+    )(graph)
+
+    positive_records = [record for record in train_dataset if int(record.label) == 1]
+    negative_records = [record for record in train_dataset if int(record.label) == 0]
+    positive_by_query = {record.query_id: record for record in positive_records}
+
+    assert len(positive_records) == len(negative_records)
+    assert all(record.query_id in positive_by_query for record in negative_records)
+    assert all(record.query_id != record.sample_id for record in negative_records)
+    assert all(int(record.src_index) == int(positive_by_query[record.query_id].src_index) for record in negative_records)
+
+
+def test_random_link_split_marks_positive_records_to_exclude_seed_edges():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 0, 1, 2, 3], [1, 2, 2, 3, 0]]),
+        x=torch.randn(4, 3),
+    )
+
+    train_dataset, val_dataset, test_dataset = RandomLinkSplit(
+        num_val=1,
+        num_test=1,
+        neg_sampling_ratio=1.0,
+        add_negative_train_samples=True,
+        seed=9,
+    )(graph)
+
+    records = list(train_dataset) + list(val_dataset) + list(test_dataset)
+    positive_records = [record for record in records if int(record.label) == 1]
+    negative_records = [record for record in records if int(record.label) == 0]
+
+    assert all(record.exclude_seed_edge for record in positive_records)
+    assert all(record.metadata["exclude_seed_edges"] is True for record in positive_records)
+    assert all(not record.exclude_seed_edge for record in negative_records)
+    assert all("exclude_seed_edges" not in record.metadata for record in negative_records)
